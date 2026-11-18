@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Dashboard() {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val client = remember { HoYoClient() }
+    val client = remember { HoYoClient(onCookieUpdate = { SecureCookieStore.save(context, it) }) }
     var linked by remember { mutableStateOf(SecureCookieStore.read(context) != null) }
     var items by remember { mutableStateOf<List<DashboardItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }

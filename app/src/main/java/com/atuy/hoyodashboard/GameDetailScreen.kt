@@ -66,7 +66,7 @@ internal fun GameDetailScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (note != null) {
-                NoteOverview(note)
+                NoteOverview(note, item.role.game.resource)
             } else {
                 Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2230))) {
                     Text(
@@ -82,7 +82,7 @@ internal fun GameDetailScreen(
 }
 
 @Composable
-private fun NoteOverview(note: DailyNote) {
+private fun NoteOverview(note: DailyNote, resourceLabel: String) {
     var showRaw by remember(note) { mutableStateOf(true) }
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2230)),
@@ -94,7 +94,7 @@ private fun NoteOverview(note: DailyNote) {
         ) {
             Text("リアルタイム情報", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("スタミナ", modifier = Modifier.weight(1f))
+                Text(resourceLabel, modifier = Modifier.weight(1f))
                 Text(
                     note.resource.current.toString() + " / " + note.resource.maximum,
                     style = MaterialTheme.typography.titleMedium,
@@ -139,8 +139,8 @@ private fun FeatureGroupCard(group: FeatureGroup) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(feature, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        if (feature == "リアルタイムノート") "取得中" else "API未移植",
-                        color = if (feature == "リアルタイムノート") Color(0xFF88D5AA) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        if (feature.startsWith("リアルタイムノート")) "表示中" else "API未移植",
+                        color = if (feature.startsWith("リアルタイムノート")) Color(0xFF88D5AA) else MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
@@ -199,7 +199,7 @@ private fun featureGroups(game: Game): List<FeatureGroup> = when (game) {
         ))
     )
     Game.ZZZ -> listOf(
-        FeatureGroup("リアルタイム", listOf("リアルタイムノート・日誌")),
+        FeatureGroup("リアルタイム", listOf("リアルタイムノート", "日誌")),
         FeatureGroup("プロフィール・エージェント", listOf(
             "プレイヤー情報・プロフィール", "エージェント一覧・詳細", "ボンプ一覧", "エージェント育成ガイド"
         )),

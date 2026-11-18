@@ -78,7 +78,11 @@ private fun Dashboard() {
         loading = true
         error = null
         try {
-            items = client.dashboard(cookie)
+            val updated = client.dashboard(cookie)
+            items = updated
+            selectedItem?.let { current ->
+                selectedItem = updated.firstOrNull { it.role == current.role }
+            }
         } catch (exception: Exception) {
             error = exception.message ?: "取得失敗"
         } finally {

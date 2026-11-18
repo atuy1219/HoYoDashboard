@@ -41,6 +41,7 @@ internal fun GameDetailScreen(
     onRefresh: () -> Unit
 ) {
     val groups = remember(item.role.game) { featureGroups(item.role.game) }
+    val note = item.note
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
@@ -64,8 +65,8 @@ internal fun GameDetailScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (item.note != null) {
-                NoteOverview(item.note)
+            if (note != null) {
+                NoteOverview(note)
             } else {
                 Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2230))) {
                     Text(
@@ -82,7 +83,7 @@ internal fun GameDetailScreen(
 
 @Composable
 private fun NoteOverview(note: DailyNote) {
-    var showRaw by remember(note) { mutableStateOf(false) }
+    var showRaw by remember(note) { mutableStateOf(true) }
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2230)),
         shape = RoundedCornerShape(20.dp)
@@ -163,45 +164,53 @@ private fun featureGroups(game: Game): List<FeatureGroup> = when (game) {
     Game.GENSHIN -> listOf(
         FeatureGroup("リアルタイム", listOf("リアルタイムノート")),
         FeatureGroup("プロフィール・キャラクター", listOf(
-            "プレイヤー情報", "キャラクター一覧", "キャラクター詳細・装備・聖遺物", "上位キャラクター設定"
+            "プレイヤー情報・プロフィール", "キャラクター一覧", "キャラクター詳細・武器・聖遺物・天賦", "上位キャラクター設定"
         )),
         FeatureGroup("戦闘記録", listOf(
-            "深境螺旋", "幻想シアター", "幽境の激戦", "追憶のエコー", "活動履歴"
+            "深境螺旋", "幻想シアター", "追憶のエコー", "幽境の激戦", "活動履歴"
         )),
         FeatureGroup("イベント・七聖召喚", listOf(
-            "イベントカレンダー", "七聖召喚プレビュー・対戦記録", "カード・デッキ・カード効果"
+            "イベントカレンダー", "七聖召喚プレビュー・対戦記録", "カード・デッキ・カード効果・コメント"
         )),
         FeatureGroup("育成・攻略", listOf(
-            "キャラクター・武器・聖遺物の育成計算", "調度品計算", "チーム編成", "塵歌壺レプリカ", "Wiki"
+            "キャラクター・武器・聖遺物の育成計算", "調度品計算", "チーム編成・編成履歴", "塵歌壺レプリカ", "Wiki"
         )),
-        FeatureGroup("履歴・HoYoLAB", listOf(
-            "原石・モラ等の月次記録", "祈願履歴", "取引履歴", "デイリー報酬", "お知らせ・Webイベント"
+        FeatureGroup("履歴", listOf(
+            "原石・モラ等の月次記録", "祈願履歴・バナー情報", "取引履歴"
+        )),
+        FeatureGroup("HoYoLAB", listOf(
+            "デイリー報酬・月間報酬", "コード交換", "お知らせ・Webイベント", "Mimoゲーム・タスク・ショップ・抽選",
+            "コンパニオンキャラクター", "投稿・コメント・トピック"
         ))
     )
     Game.STAR_RAIL -> listOf(
         FeatureGroup("リアルタイム", listOf("リアルタイムノート")),
         FeatureGroup("プロフィール・キャラクター", listOf(
-            "プレイヤー情報", "キャラクター一覧・詳細", "編成シミュレータ"
+            "プレイヤー情報・プロフィール", "キャラクター一覧・詳細", "編成シミュレータ・編成履歴"
         )),
-        FeatureGroup("戦闘・模擬宇宙", listOf(
+        FeatureGroup("戦闘記録・模擬宇宙", listOf(
             "忘却の庭", "虚構叙事", "末日の幻影", "模擬宇宙・階差宇宙", "異相演算"
         )),
         FeatureGroup("イベント・履歴", listOf(
-            "イベントカレンダー", "開拓紀行・月次記録", "ワープ履歴", "取引履歴"
+            "イベントカレンダー", "開拓紀行・月次記録", "ワープ履歴・星5統計", "取引履歴"
         )),
-        FeatureGroup("HoYoLAB", listOf("デイリー報酬", "お知らせ・Webイベント", "Wiki"))
+        FeatureGroup("HoYoLAB", listOf(
+            "デイリー報酬・月間報酬", "お知らせ・Webイベント", "Mimoゲーム・タスク・ショップ"
+        ))
     )
     Game.ZZZ -> listOf(
-        FeatureGroup("リアルタイム", listOf("リアルタイムノート")),
+        FeatureGroup("リアルタイム", listOf("リアルタイムノート・日誌")),
         FeatureGroup("プロフィール・エージェント", listOf(
-            "プレイヤー情報", "エージェント一覧・詳細", "ボンプ一覧", "育成ガイド"
+            "プレイヤー情報・プロフィール", "エージェント一覧・詳細", "ボンプ一覧", "エージェント育成ガイド"
         )),
         FeatureGroup("戦闘記録", listOf(
-            "式輿防衛", "危局強襲", "零号ホロウ", "閾値シミュレーション"
+            "式輿防衛", "危局強襲", "殲滅シミュレーション", "零号ホロウ：Lost Void", "閾値シミュレーション"
         )),
         FeatureGroup("イベント・履歴", listOf(
-            "イベントカレンダー", "ガチャカレンダー・提供割合", "変調履歴", "スクラッチ・ビデオ屋日誌"
+            "イベントカレンダー", "ガチャカレンダー・提供情報", "変調履歴"
         )),
-        FeatureGroup("HoYoLAB", listOf("デイリー報酬", "お知らせ・Webイベント"))
+        FeatureGroup("HoYoLAB", listOf(
+            "デイリー報酬・月間報酬", "お知らせ・Webイベント", "Mimoゲーム・タスク・ショップ"
+        ))
     )
 }

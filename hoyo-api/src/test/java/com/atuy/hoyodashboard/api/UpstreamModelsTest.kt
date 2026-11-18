@@ -54,12 +54,14 @@ class UpstreamModelsTest {
                 .put("time", "2026-11-18 12:00:00")
                 .put("tz_offset", -13)
                 .put("gacha_type", 301)
-                .put("item_id", "1001"),
+                .put("item_id", "1001")
+                .put("is_up", 1),
             0
         )
         assertEquals(5, wish.rarity)
         assertEquals(301, wish.bannerType)
         assertEquals(-13, wish.timezoneOffset)
+        assertTrue(wish.isUp == true)
         assertTrue(wish.timestamp > 0)
     }
 

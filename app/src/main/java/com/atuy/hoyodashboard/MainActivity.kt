@@ -7,15 +7,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -43,7 +42,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.atuy.hoyodashboard.api.DashboardItem
-import com.atuy.hoyodashboard.api.Game
 import com.atuy.hoyodashboard.api.HoYoClient
 import kotlinx.coroutines.delay
 
@@ -63,6 +61,7 @@ private fun Dashboard() {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
+    var selectedItem by remember { mutableStateOf<DashboardItem?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode == Activity.RESULT_OK) {
             linked = true
@@ -79,7 +78,11 @@ private fun Dashboard() {
         loading = true
         error = null
         try {
-            items = client.dashboard(cookie)
+            val updated = client.dashboard(cookie)
+            items = updated
+            selectedItem?.let { current ->
+                selectedItem = updated.firstOrNull { it.role == current.role }
+            }
         } catch (exception: Exception) {
             error = exception.message ?: "取得失敗"
         } finally {
@@ -102,38 +105,54 @@ private fun Dashboard() {
         )
     ) {
         Surface(Modifier.fillMaxSize()) {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("HoYoDashboard", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    if (linked) {
-                        Button(onClick = { refresh++ }, enabled = !loading) { Text("更新") }
+            val selected = selectedItem
+            if (selected != null) {
+                GameDetailScreen(
+                    item = selected,
+                    onBack = { selectedItem = null },
+                    onRefresh = { refresh++ }
+                )
+            } else {
+                Column(
+                    Modifier.fillMaxSize().safeDrawingPadding()
+                        .verticalScroll(rememberScrollState()).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "HoYoDashboard",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (linked) {
+                            Button(onClick = { refresh++ }, enabled = !loading) { Text("更新") }
+                        }
                     }
-                }
-                if (!linked) {
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { launcher.launch(Intent(context, LoginActivity::class.java)) }
-                    ) { Text("HoYoLABにログイン") }
-                }
-                if (loading) CircularProgressIndicator()
-                if (error != null) Text(error ?: "", color = MaterialTheme.colorScheme.error)
-                if (linked && !loading && error == null && items.isEmpty()) {
-                    Text("紐付いたゲームアカウントが見つかりませんでした")
-                }
-                items.forEach { item -> StatusCard(item) }
-                if (linked) {
-                    OutlinedButton(
-                        onClick = {
-                            SecureCookieStore.clear(context)
-                            linked = false
-                            items = emptyList()
-                            error = null
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("連携を解除") }
+                    if (!linked) {
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { launcher.launch(Intent(context, LoginActivity::class.java)) }
+                        ) { Text("HoYoLABにログイン") }
+                    }
+                    if (loading) CircularProgressIndicator()
+                    if (error != null) Text(error ?: "", color = MaterialTheme.colorScheme.error)
+                    if (linked && !loading && error == null && items.isEmpty()) {
+                        Text("紐付いたゲームアカウントが見つかりませんでした")
+                    }
+                    items.forEach { item -> StatusCard(item) { selectedItem = item } }
+                    if (linked) {
+                        OutlinedButton(
+                            onClick = {
+                                SecureCookieStore.clear(context)
+                                linked = false
+                                items = emptyList()
+                                selectedItem = null
+                                error = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("連携を解除") }
+                    }
                 }
             }
         }
@@ -141,10 +160,12 @@ private fun Dashboard() {
 }
 
 @Composable
-private fun StatusCard(item: DashboardItem) {
+private fun StatusCard(item: DashboardItem, onClick: () -> Unit) {
     val game = item.role.game
     val note = item.note
     Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2230)),
         shape = RoundedCornerShape(20.dp)
     ) {
@@ -152,7 +173,15 @@ private fun StatusCard(item: DashboardItem) {
             Modifier.fillMaxWidth().padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(game.label, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    game.label,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text("詳細を見る", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+            }
             Text(item.role.nickname + " · " + item.role.uid, style = MaterialTheme.typography.bodySmall)
             if (note == null) {
                 Text(item.error ?: "取得失敗", color = MaterialTheme.colorScheme.error)

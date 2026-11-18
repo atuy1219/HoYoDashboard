@@ -5,6 +5,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -54,7 +55,7 @@ class HoYoClient {
         }
         val url = endpoint + "?role_id=" + encode(role.uid) + "&server=" + encode(role.server)
         val data = fetch(url, cookie)
-        return when (role.game) {
+        val note = when (role.game) {
             Game.GENSHIN -> {
                 val tasks = data.optJSONObject("daily_task")
                 val done = tasks?.int("completed_tasks") ?: data.int("finished_task_num", "completed_commissions")
@@ -99,6 +100,27 @@ class HoYoClient {
                 )
             }
         }
+        return note.copy(rawFields = flatten(data))
+    }
+
+    private fun flatten(value: JSONObject, prefix: String = ""): List<Detail> = buildList {
+        val keys = value.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val path = if (prefix.isEmpty()) key else "$prefix.$key"
+            addAll(flattenValue(value.opt(key), path))
+        }
+    }
+
+    private fun flattenValue(value: Any?, path: String): List<Detail> = when (value) {
+        is JSONObject -> flatten(value, path)
+        is JSONArray -> buildList {
+            for (index in 0 until value.length()) {
+                addAll(flattenValue(value.opt(index), "$path[$index]"))
+            }
+        }
+        null, JSONObject.NULL -> emptyList()
+        else -> listOf(Detail(path, value.toString()))
     }
 
     private suspend fun fetch(url: String, cookie: String): JSONObject = withContext(Dispatchers.IO) {

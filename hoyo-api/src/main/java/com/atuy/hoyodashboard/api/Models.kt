@@ -24,7 +24,8 @@ data class DailyNote(
     val secondsUntilFull: Long?,
     val daily: Progress?,
     val dailyCompleted: Boolean?,
-    val details: List<Detail> = emptyList()
+    val details: List<Detail> = emptyList(),
+    val rawFields: List<Detail> = emptyList()
 )
 
 data class DashboardItem(val role: Role, val note: DailyNote?, val error: String?)

@@ -78,12 +78,13 @@ internal fun GameDetailScreen(
     onRefresh: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val cookie = remember(item.role) { SecureCookieStore.read(context).orEmpty() }
     val api = remember {
         UpstreamApiClient(onCookieUpdate = { SecureCookieStore.save(context, it) })
     }
     val account = remember(item.role) { ApiAccount.from(item.role) }
-    val features = remember(item.role, cookie) { UpstreamFeatureClient(api, cookie, account) }
+    val features = remember(item.role) {
+        UpstreamFeatureClient(api, { SecureCookieStore.read(context).orEmpty() }, account)
+    }
     val actions = remember { UpstreamActions() }
     val tabs = remember(item.role.game) { tabsFor(item.role.game) }
 
@@ -101,7 +102,7 @@ internal fun GameDetailScreen(
 
     val activeTab = tabs.getOrElse(selectedIndex) { tabs.first() }
 
-    LaunchedEffect(item.role, activeTab, refreshToken, cookie) {
+    LaunchedEffect(item.role, activeTab, refreshToken) {
         activeLoading = activeTab in setOf(
             DetailTab.OVERVIEW, DetailTab.CHARACTERS, DetailTab.BATTLE,
             DetailTab.GACHA, DetailTab.DIARY
@@ -206,7 +207,9 @@ internal fun GameDetailScreen(
                 DetailTab.BATTLE -> battle?.let { JsonPanel("戦闘記録", it) }
                 DetailTab.GACHA -> gacha?.let { GachaList(it) }
                 DetailTab.DIARY -> diary?.let { DiaryPanel(it, transactions) }
-                DetailTab.ACTIONS -> ActionPanel(cookie, account, actions)
+                DetailTab.ACTIONS -> ActionPanel(
+                    { SecureCookieStore.read(context).orEmpty() }, account, actions
+                )
                 DetailTab.API -> UpstreamApiExplorer(item.role)
             }
         }
@@ -422,7 +425,7 @@ private fun DiaryPanel(summary: DiarySummary, transactions: List<TransactionItem
 
 @Composable
 private fun ActionPanel(
-    cookie: String,
+    cookieProvider: () -> String,
     account: ApiAccount,
     actions: UpstreamActions
 ) {
@@ -454,7 +457,7 @@ private fun ActionPanel(
             message = null
             result = null
             try {
-                val response = actions.execute(cookie, account, definition.name, arguments)
+                val response = actions.execute(cookieProvider(), account, definition.name, arguments)
                 result = response
                 message = if (response.optInt("retcode", 0) == 0) {
                     response.optString("message").ifBlank { "操作を完了しました" }
@@ -475,7 +478,7 @@ private fun ActionPanel(
                     message = null
                     result = null
                     try {
-                        val response = actions.claimDailyReward(cookie, account)
+                        val response = actions.claimDailyReward(cookieProvider(), account)
                         result = response
                         message = if (response.optInt("retcode", 0) == 0) {
                             response.optString("message").ifBlank { "チェックイン処理を完了しました" }
@@ -487,7 +490,7 @@ private fun ActionPanel(
                     }
                 }
             },
-            enabled = !busy && cookie.isNotBlank(),
+            enabled = !busy && cookieProvider().isNotBlank(),
             modifier = Modifier.fillMaxWidth()
         ) { Text(if (busy) "処理中…" else "デイリーチェックイン") }
 
@@ -508,7 +511,7 @@ private fun ActionPanel(
                         message = null
                         result = null
                         try {
-                            val response = actions.redeemCode(cookie, account, code)
+                            val response = actions.redeemCode(cookieProvider(), account, code)
                             result = response
                             message = if (response.optInt("retcode", 0) == 0) {
                                 response.optString("message").ifBlank { "コード交換処理を完了しました" }
@@ -520,7 +523,7 @@ private fun ActionPanel(
                         }
                     }
                 },
-                enabled = !busy && code.isNotBlank() && cookie.isNotBlank(),
+                enabled = !busy && code.isNotBlank() && cookieProvider().isNotBlank(),
                 modifier = Modifier.fillMaxWidth()
             ) { Text("コードを交換") }
         }

@@ -7,15 +7,18 @@ import org.json.JSONObject
 
 class UpstreamFeatureClient(
     private val api: UpstreamApiClient,
-    private val cookie: String,
+    private val cookieProvider: () -> String,
     val account: ApiAccount
 ) {
+    constructor(api: UpstreamApiClient, cookie: String, account: ApiAccount) :
+        this(api, { cookie }, account)
+
     fun availableMethods(): List<ApiMethod> = api.available(account.game)
 
     suspend fun raw(
         method: String,
         arguments: Map<String, String> = emptyMap()
-    ): JSONObject = api.call(cookie, account, method, arguments)
+    ): JSONObject = api.call(cookieProvider(), account, method, arguments)
 
     suspend fun profile(): GameProfile {
         val method = when (account.game) {
@@ -220,7 +223,7 @@ class UpstreamFeatureClient(
     ): Flow<JSONObject> {
         val definition = UpstreamCatalog.find(method)
             ?: throw IllegalArgumentException("Unknown upstream method: " + method)
-        return UpstreamPaginator(api).pages(cookie, account, definition, arguments, spec)
+        return UpstreamPaginator(api).pages(cookieProvider(), account, definition, arguments, spec)
     }
 }
 

@@ -156,7 +156,7 @@ class UpstreamApiClient(
     private fun jsonBody(params: Map<String, String>): JSONObject = JSONObject().apply {
         for ((key, value) in params) {
             val parsed = if (key in setOf("avatar_list", "entry_page_ids", "character_ids")) {
-                runCatching { JSONArray(value) }.getOrElse { value }
+                try { JSONArray(value) as Any } catch (_: Exception) { value }
             } else value
             put(key, parsed)
         }
@@ -269,7 +269,7 @@ class ApiTransport {
         ).any { host == it || host.endsWith("." + it) }) { "Unsafe API host" }
         val path = uri.rawPath.orEmpty().trimEnd('/') + "/" + endpoint.trimStart('/')
         val query = buildList {
-            if (!uri.rawQuery.isNullOrEmpty()) add(uri.rawQuery)
+            uri.rawQuery?.takeIf { it.isNotBlank() }?.let { add(it) }
             for ((key, value) in params) add(encode(key) + "=" + encode(value))
         }.joinToString("&")
         val url = URL(uri.scheme + "://" + host + path + if (query.isEmpty()) "" else "?" + query)

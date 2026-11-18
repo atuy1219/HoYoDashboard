@@ -108,6 +108,31 @@ class UpstreamApiClient(
             return JSONObject().put("user", user).put("battlesuits", suits).put("abyss", abyss)
                 .put("memorial_arena", arena).put("elysian_realm", realm)
         }
+        if (method.name == "get_tcg_cards") {
+            val characterMethod = method.copy(name = "tcg_character_cards", endpoint = "roles", verb = "GET")
+            val characterData = call(cookie, account, characterMethod)
+            val characterRows = characterData.optJSONArray("list") ?: JSONArray()
+            val cards = JSONArray()
+            for (i in 0 until characterRows.length()) cards.put(characterRows.opt(i))
+            val ids = JSONArray()
+            for (i in 0 until characterRows.length()) {
+                val id = characterRows.optJSONObject(i)?.optInt("id", 0) ?: 0
+                if (id > 0) ids.put(id)
+            }
+            if (ids.length() > 0) {
+                val actionMethod = method.copy(
+                    name = "tcg_action_cards", endpoint = "actions",
+                    verb = "READ_POST", required = setOf("role_ids")
+                )
+                val actionData = call(cookie, account, actionMethod, mapOf("role_ids" to ids.toString()))
+                val actionRows = actionData.optJSONArray("list") ?: JSONArray()
+                for (i in 0 until actionRows.length()) cards.put(actionRows.opt(i))
+            }
+            return JSONObject().put("list", cards)
+        }
+        if (method.name == "get_tcg_deck_comments") {
+            return allTcgDeckComments(cookie, account, method, arguments)
+        }
         if (method.name == "get_all_zzz_agent_upgrade_guides") {
             val agents = call(cookie, account, "get_zzz_upgrade_guide_agents")
             val rows = agents.optJSONArray("list") ?: JSONArray()
@@ -246,6 +271,10 @@ class UpstreamApiClient(
             params["lineup_type"] = params.remove("type").orEmpty()
             params["game"] = "hkrpg"
         }
+        if (method.name == "get_tcg_card_effect") {
+            val cardId = params["id"]?.toIntOrNull() ?: 0
+            if (cardId >= 10000) params["__tcg_action_effect"] = "true"
+        }
         if (method.name == "get_web_events") {
             val gameId = when (account.game) {
                 ApiGame.HONKAI -> 1
@@ -316,6 +345,8 @@ class UpstreamApiClient(
         val path = when {
             method.name == "get_hoyolab_user" && account.region == ApiRegion.CHINESE ->
                 "user/wapi/getUserFullInfo"
+            method.name == "get_tcg_card_effect" && params.remove("__tcg_action_effect") == "true" ->
+                "role/action_skill"
             method.name == "get_banner_details" -> {
                 require(account.game == ApiGame.GENSHIN || account.game == ApiGame.STARRAIL)
                 val gameName = if (account.game == ApiGame.STARRAIL) "hkrpg" else "hk4e"
@@ -549,6 +580,36 @@ class UpstreamApiClient(
         }
     }
 
+    private suspend fun allTcgDeckComments(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod,
+        arguments: Map<String, String>
+    ): JSONObject {
+        val params = method.defaults + arguments
+        var cursor = params["next"] ?: "0"
+        val rows = JSONArray()
+        repeat(100) {
+            val response = transport.send(
+                route(ApiScope.BOULEUTERION, account.game, account.region),
+                method.endpoint,
+                cookie,
+                account.region,
+                language,
+                "GET",
+                params + ("next" to cursor),
+                null
+            )
+            val page = response.optJSONArray("list") ?: JSONArray()
+            for (i in 0 until page.length()) rows.put(page.opt(i))
+            val next = response.optJSONObject("cursor")?.opt("next")?.toString().orEmpty()
+            if (page.length() == 0 || next.isBlank() || next == "0" || next == cursor) return JSONObject().put("list", rows)
+            cursor = next
+            kotlinx.coroutines.delay(300)
+        }
+        return JSONObject().put("list", rows)
+    }
+
     private suspend fun collectPages(
         cookie: String,
         account: ApiAccount,
@@ -560,7 +621,7 @@ class UpstreamApiClient(
         val result = JSONArray()
         val cursorParameter = when (method.name) {
             "claimed_rewards", "genshin_diary_log", "starrail_diary_log", "get_zzz_diary_detail" -> "current_page"
-            "get_lineups", "get_starrail_lineups" -> "next_page_token"
+"get_lineups", "get_starrail_lineups", "get_tcg_decks" -> "next_page_token"
             else -> "page"
         }
         paginator.pages(
@@ -682,7 +743,7 @@ class UpstreamApiClient(
     private fun jsonBody(params: Map<String, String>): JSONObject = JSONObject().apply {
         for ((key, value) in params) {
             val parsed: Any = when {
-                key in setOf("avatar_list", "entry_page_ids", "character_ids", "types") ->
+                key in setOf("avatar_list", "entry_page_ids", "character_ids", "types", "role_ids", "role_card_id") ->
                     try { JSONArray(value) } catch (_: Exception) { value }
                 key in setOf("is_first_brush", "is_cancel", "sync_all_roles") ->
                     value.equals("true", ignoreCase = true)
@@ -749,6 +810,7 @@ class UpstreamApiClient(
             ApiScope.HSR_WARP -> if (cn) "https://api-takumi.mihoyo.com/event/rpg_gacha_record"
                 else "https://sg-act-public-api.hoyolab.com/event/rpg_gacha_record"
             ApiScope.CARD_PLAZA -> "https://sg-act-public-api.hoyolab.com/event/cardsquare"
+            ApiScope.BOULEUTERION -> "https://sg-act-public-api.hoyolab.com/bouleuterion_v2/v1"
             ApiScope.TEAPOT -> if (cn) throw UnsupportedOperationException("Teapot has no Chinese route.")
                 else "https://sg-hk4e-api.hoyolab.com/event/e20221121ugcos"
             ApiScope.WIKI -> "https://sg-wiki-api.hoyolab.com/hoyowiki/wapi"

@@ -144,7 +144,11 @@ class UpstreamApiClient(
             "get_starrail_lineups" to 20,
             "get_tcg_decks" to 20,
             "teapot_replicas" to 20,
-            "get_mimo_point_history" to 20
+            "get_mimo_point_history" to 20,
+            "get_calculator_characters" to 200,
+            "get_calculator_weapons" to 200,
+            "get_calculator_artifacts" to 200,
+            "get_calculator_furnishings" to 200
         )
         pageSizes[method.name]?.let { pageSize ->
             return collectPages(cookie, account, method, arguments, pageSize)

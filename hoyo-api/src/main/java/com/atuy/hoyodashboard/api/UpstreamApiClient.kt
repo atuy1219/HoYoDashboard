@@ -336,6 +336,7 @@ class UpstreamApiClient(
         if (method.scope == ApiScope.ZZZ_LEDGER || method.scope == ApiScope.CULTIVATE) {
             params["uid"] = account.uid
             params["region"] = account.server
+            if (method.scope == ApiScope.ZZZ_LEDGER) params.putIfAbsent("month", "")
         }
         if (method.name == "get_starrail_lineups") {
             params["lineup_type"] = params.remove("type").orEmpty()
@@ -498,10 +499,11 @@ class UpstreamApiClient(
         } else cookie
         val rpcHeaders = method.scope in setOf(
             ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT,
-            ApiScope.CULTIVATE, ApiScope.HSR_WARP, ApiScope.HSR_LINEUP
+            ApiScope.CULTIVATE, ApiScope.HSR_WARP, ApiScope.HSR_LINEUP, ApiScope.ZZZ_LEDGER
         )
         val signed = method.scope in setOf(
-            ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT, ApiScope.HSR_LINEUP
+            ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT,
+            ApiScope.HSR_LINEUP, ApiScope.ZZZ_LEDGER
         ) || ((method.scope == ApiScope.CULTIVATE || method.scope == ApiScope.HSR_WARP) &&
             account.region == ApiRegion.CHINESE)
         return try {

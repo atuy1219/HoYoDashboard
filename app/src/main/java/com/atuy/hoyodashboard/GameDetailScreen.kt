@@ -15,6 +15,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +51,7 @@ import com.atuy.hoyodashboard.api.GenshinProfile
 import com.atuy.hoyodashboard.api.HonkaiProfile
 import com.atuy.hoyodashboard.api.StarRailProfile
 import com.atuy.hoyodashboard.api.TransactionItem
+import com.atuy.hoyodashboard.api.UpstreamActionDefinition
 import com.atuy.hoyodashboard.api.UpstreamActions
 import com.atuy.hoyodashboard.api.UpstreamApiClient
 import com.atuy.hoyodashboard.api.UpstreamFeatureClient
@@ -416,6 +419,41 @@ private fun ActionPanel(
     var message by remember(account) { mutableStateOf<String?>(null) }
     var result by remember(account) { mutableStateOf<JSONObject?>(null) }
     var code by remember(account) { mutableStateOf("") }
+    val advancedActions = remember(account) {
+        actions.availableActions(account).filterNot {
+            it.name == "claim_daily_reward" || it.name == "redeem_code"
+        }
+    }
+    var actionMenuExpanded by remember(account) { mutableStateOf(false) }
+    var selectedAction by remember(account) { mutableStateOf<UpstreamActionDefinition?>(null) }
+    var actionParameters by remember(account) { mutableStateOf("") }
+    var confirmAdvancedAction by remember(account) { mutableStateOf(false) }
+
+    fun runAdvancedAction() {
+        val definition = selectedAction ?: return
+        val arguments = actionParameters.lines().mapNotNull { line ->
+            val separator = line.indexOf('=')
+            if (separator <= 0) null else {
+                line.substring(0, separator).trim() to line.substring(separator + 1).trim()
+            }
+        }.toMap()
+        scope.launch {
+            busy = true
+            message = null
+            result = null
+            try {
+                val response = actions.execute(cookie, account, definition.name, arguments)
+                result = response
+                message = if (response.optInt("retcode", 0) == 0) {
+                    response.optString("message").ifBlank { "操作を完了しました" }
+                } else response.optString("message").ifBlank { "操作に失敗しました" }
+            } catch (exception: Exception) {
+                message = exception.message ?: "操作に失敗しました"
+            } finally {
+                busy = false
+            }
+        }
+    }
 
     SectionCard("HoYoLAB操作") {
         Button(
@@ -474,9 +512,70 @@ private fun ActionPanel(
                 modifier = Modifier.fillMaxWidth()
             ) { Text("コードを交換") }
         }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
+    SectionCard("高度な操作") {
+        TextButton(onClick = { actionMenuExpanded = true }) {
+            Text(selectedAction?.title ?: "操作を選択")
+        }
+        DropdownMenu(
+            expanded = actionMenuExpanded,
+            onDismissRequest = { actionMenuExpanded = false }
+        ) {
+            advancedActions.forEach { definition ->
+                DropdownMenuItem(
+                    text = { Text(definition.title) },
+                    onClick = {
+                        selectedAction = definition
+                        actionParameters = ""
+                        actionMenuExpanded = false
+                    }
+                )
+            }
+        }
+        selectedAction?.let { definition ->
+            Text(
+                if (definition.required.isEmpty()) "追加パラメータは不要です"
+                else "必須: " + definition.required.joinToString(", "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = actionParameters,
+                onValueChange = { actionParameters = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("key=value（1行につき1件）") },
+                minLines = 2
+            )
+            Button(
+                onClick = {
+                    if (definition.confirmationRequired) confirmAdvancedAction = true
+                    else runAdvancedAction()
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("操作を実行") }
+        }
+    }
+    message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     result?.let { JsonPanel("操作結果", it) }
+
+    val pendingAction = selectedAction
+    if (confirmAdvancedAction && pendingAction != null) {
+        AlertDialog(
+            onDismissRequest = { confirmAdvancedAction = false },
+            title = { Text(pendingAction.title) },
+            text = { Text("アカウントに変更を加える操作です。入力内容を確認して実行してください。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmAdvancedAction = false
+                    runAdvancedAction()
+                }) { Text("実行") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmAdvancedAction = false }) { Text("キャンセル") }
+            }
+        )
+    }
 }
 
 @Composable

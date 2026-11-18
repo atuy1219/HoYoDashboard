@@ -19,6 +19,11 @@ class UpstreamActionsTest {
         assertTrue("finish_mimo_task" in names)
         assertTrue("reply_to_post" in names)
         assertTrue("delete_reply" in names)
+        assertTrue(names.size == 15)
+        val definitions = actions.availableActions(account).associateBy { it.name }
+        assertTrue(definitions.getValue("delete_reply").confirmationRequired)
+        assertTrue(definitions.getValue("buy_mimo_shop_item").confirmationRequired)
+        assertTrue(definitions.getValue("set_top_genshin_characters").required == listOf("character_ids"))
     }
 
     @Test
@@ -36,6 +41,22 @@ class UpstreamActionsTest {
         assertFalse("redeem_code" in honkaiActions)
         assertFalse("set_top_genshin_characters" in honkaiActions)
         assertFalse("update_settings" in tearsActions)
+    }
+
+    @Test
+    fun rejectsMalformedArgumentsBeforeMakingRequest() = runBlocking {
+        val account = ApiAccount(ApiGame.GENSHIN, "800000001", "os_asia")
+        try {
+            actions.execute(
+                "",
+                account,
+                "set_top_genshin_characters",
+                mapOf("character_ids" to "1001,not-an-id")
+            )
+            throw AssertionError("Expected malformed IDs to be rejected")
+        } catch (error: IllegalArgumentException) {
+            assertTrue(error.message.orEmpty().contains("integers"))
+        }
     }
 
     @Test

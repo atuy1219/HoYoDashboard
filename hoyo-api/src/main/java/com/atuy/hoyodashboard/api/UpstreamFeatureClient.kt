@@ -38,6 +38,17 @@ class UpstreamFeatureClient(
         return UpstreamModelParser.characters(raw(method))
     }
 
+    suspend fun detailedCharacters(): List<JSONObject> {
+        val method = when (account.game) {
+            ApiGame.GENSHIN -> "get_genshin_detailed_characters"
+            ApiGame.STARRAIL -> "get_starrail_characters"
+            ApiGame.ZZZ -> "get_zzz_agent_info"
+            ApiGame.HONKAI -> "get_honkai_battlesuits"
+            ApiGame.TOT -> throw UnsupportedOperationException("Tears of Themis has no character Chronicle API.")
+        }
+        return raw(method).jsonList()
+    }
+
     suspend fun fullBattleRecord(): JSONObject = when (account.game) {
         ApiGame.GENSHIN -> raw("get_full_genshin_user")
         ApiGame.STARRAIL -> JSONObject()
@@ -65,12 +76,15 @@ class UpstreamFeatureClient(
         }
         val args = limit?.takeIf { it > 0 }?.let { mapOf("limit" to it.toString()) } ?: emptyMap()
         val response = raw(method, args)
-        val rows = response.optJSONArray("list") ?: JSONArray()
-        return (0 until rows.length()).mapNotNull { index ->
-            rows.optJSONObject(index)?.let { item ->
-                GachaRecord.from(item, item.optInt("gacha_type", item.optInt("real_gacha_type")))
-            }
+        return UpstreamModelParser.gachaHistory(response, 0)
+    }
+
+    suspend fun transactionHistory(limit: Int? = null): List<TransactionItem> {
+        require(account.game == ApiGame.GENSHIN) {
+            "Transaction history is currently available only for Genshin Impact."
         }
+        val args = limit?.takeIf { it > 0 }?.let { mapOf("limit" to it.toString()) } ?: emptyMap()
+        return UpstreamModelParser.transactions(raw("transaction_log", args))
     }
 
     suspend fun monthlyDiary(month: String? = null): DiarySummary {

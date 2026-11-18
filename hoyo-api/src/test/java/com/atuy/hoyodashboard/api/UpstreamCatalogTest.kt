@@ -14,7 +14,7 @@ class UpstreamCatalogTest {
 
     @Test
     fun catalogCoversAllClientComponents() {
-        assertTrue(UpstreamCatalog.methods.size >= 90)
+        assertTrue(UpstreamCatalog.methods.size >= 117)
         assertTrue(UpstreamCatalog.find("get_genshin_spiral_abyss") != null)
         assertTrue(UpstreamCatalog.find("get_starrail_pure_fiction") != null)
         assertTrue(UpstreamCatalog.find("get_deadly_assault") != null)

@@ -112,14 +112,37 @@ data class GachaRecord(
     }
 }
 
+data class DiaryCategory(
+    val id: String?,
+    val name: String,
+    val amount: Long,
+    val percentage: Int?
+)
+
 data class DiarySummary(
     val month: String?,
     val currentPrimogems: Long?,
     val currentMora: Long?,
     val currentStellarJades: Long?,
     val currentCredits: Long?,
+    val currentHcoin: Long?,
+    val currentRailsPass: Long?,
+    val currentPolychromes: Long?,
+    val currentMasterTapes: Long?,
+    val currentBoopons: Long?,
+    val categories: List<DiaryCategory>,
     val raw: JSONObject
 )
+
+internal fun mergeHistoryByTime(
+    groups: List<List<JSONObject>>,
+    limit: Int?
+): List<JSONObject> {
+    val merged = groups.asSequence().flatten()
+        .sortedByDescending { it.optString("time") }
+        .toList()
+    return if (limit != null && limit > 0) merged.take(limit) else merged
+}
 
 data class RewardItem(
     val name: String,
@@ -211,14 +234,45 @@ object UpstreamModelParser {
         }
     }
 
-    fun diary(raw: JSONObject): DiarySummary = DiarySummary(
-        month = raw.stringOrNull("month", "month_str"),
-        currentPrimogems = raw.longOrNull("current_primogems"),
-        currentMora = raw.longOrNull("current_mora"),
-        currentStellarJades = raw.longOrNull("current_stellar_jades"),
-        currentCredits = raw.longOrNull("current_credits"),
-        raw = raw
-    )
+    fun diary(raw: JSONObject): DiarySummary {
+        val monthData = raw.optJSONObject("month_data") ?: raw.optJSONObject("data") ?: raw
+        val income = monthData.optJSONObject("income") ?: JSONObject()
+        val currencies = income.optJSONArray("list") ?: monthData.optJSONArray("list") ?: JSONArray()
+        val currencyValues = linkedMapOf<String, Long>()
+        for (index in 0 until currencies.length()) {
+            val item = currencies.optJSONObject(index) ?: continue
+            val type = item.string("data_type", "type")
+            val name = item.string("data_name", "name")
+            val amount = item.longOrNull("count", "num", "amount") ?: 0L
+            if (type.isNotBlank()) currencyValues[type] = amount
+            if (name.isNotBlank()) currencyValues[name] = amount
+        }
+        val categoryRows = monthData.optJSONArray("group_by")
+            ?: income.optJSONArray("income_components") ?: JSONArray()
+        val categories = (0 until categoryRows.length()).mapNotNull { index ->
+            val item = categoryRows.optJSONObject(index) ?: return@mapNotNull null
+            DiaryCategory(
+                id = item.stringOrNull("action_id", "action", "data_type"),
+                name = item.string("action", "action_name", "data_name", "name"),
+                amount = item.longOrNull("num", "count", "amount") ?: 0L,
+                percentage = item.opt("percent")?.toString()?.toIntOrNull()
+            )
+        }
+        return DiarySummary(
+            month = raw.stringOrNull("data_month", "month", "month_str", "current_month"),
+            currentPrimogems = monthData.longOrNull("current_primogems"),
+            currentMora = monthData.longOrNull("current_mora"),
+            currentStellarJades = monthData.longOrNull("current_stellar_jades"),
+            currentCredits = monthData.longOrNull("current_credits"),
+            currentHcoin = monthData.longOrNull("current_hcoin"),
+            currentRailsPass = monthData.longOrNull("current_rails_pass"),
+            currentPolychromes = currencyValues["PolychromesData"] ?: currencyValues["Polychromes"],
+            currentMasterTapes = currencyValues["MatserTapeData"] ?: currencyValues["MasterTapeData"],
+            currentBoopons = currencyValues["BooponsData"] ?: currencyValues["Boopons"],
+            categories = categories,
+            raw = raw
+        )
+    }
 
     fun rewards(raw: JSONObject): List<RewardItem> {
         val list = raw.optJSONArray("list") ?: raw.optJSONArray("awards") ?: JSONArray()

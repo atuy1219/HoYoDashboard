@@ -806,6 +806,7 @@ class UpstreamApiClient(
         val records = mutableListOf<JSONObject>()
         val paginator = UpstreamPaginator(this)
         for (kind in kinds) {
+            val kindRecords = mutableListOf<JSONObject>()
             val pageArgs = baseArgs + mapOf("kind" to kind, "end_id" to "0", "size" to "20")
             paginator.pages(
                 cookie, account, pageMethod, pageArgs,
@@ -819,13 +820,12 @@ class UpstreamApiClient(
                 )
             ).takeWhile { page ->
                 val rows = page.optJSONArray("list") ?: JSONArray()
-                for (i in 0 until rows.length()) rows.optJSONObject(i)?.let(records::add)
-                requestedLimit == null || records.size < requestedLimit
+                for (i in 0 until rows.length()) rows.optJSONObject(i)?.let(kindRecords::add)
+                requestedLimit == null || kindRecords.size < requestedLimit
             }.collect { }
-            if (requestedLimit != null && records.size >= requestedLimit) break
+            records.addAll(kindRecords)
         }
-        val sorted = records.sortedByDescending { it.optString("time") }
-            .let { if (requestedLimit == null) it else it.take(requestedLimit) }
+        val sorted = mergeHistoryByTime(listOf(records), requestedLimit)
         return JSONObject().put("list", JSONArray(sorted))
     }
 
@@ -848,6 +848,7 @@ class UpstreamApiClient(
         val records = mutableListOf<JSONObject>()
         val paginator = UpstreamPaginator(this)
         for (bannerType in types) {
+            val kindRecords = mutableListOf<JSONObject>()
             val pageArgs = baseArgs + mapOf(
                 "gacha_type" to bannerType.toString(),
                 "end_id" to "0",
@@ -871,18 +872,17 @@ class UpstreamApiClient(
                 val timezoneOffset = gachaTimezoneOffset(account, page)
                 for (i in 0 until rows.length()) {
                     val item = rows.optJSONObject(i) ?: continue
-                    records.add(
+                    kindRecords.add(
                         JSONObject(item.toString())
                             .put("gacha_type", bannerType)
                             .put("tz_offset", timezoneOffset)
                     )
                 }
-                requestedLimit == null || records.size < requestedLimit
+                requestedLimit == null || kindRecords.size < requestedLimit
             }.collect { }
-            if (requestedLimit != null && records.size >= requestedLimit) break
+            records.addAll(kindRecords)
         }
-        val sorted = records.sortedByDescending { it.optString("time") }
-            .let { if (requestedLimit == null) it else it.take(requestedLimit) }
+        val sorted = mergeHistoryByTime(listOf(records), requestedLimit)
         return JSONObject().put("list", JSONArray(sorted))
     }
 

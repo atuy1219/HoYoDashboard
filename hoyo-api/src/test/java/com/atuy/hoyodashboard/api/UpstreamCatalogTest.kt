@@ -38,7 +38,7 @@ class UpstreamCatalogTest {
         assertFalse("get_mimo_games" in chinaNames)
         assertFalse("get_web_events" in chinaNames)
         assertFalse("get_accompany_character_details" in chinaNames)
-        assertFalse("transaction_log" in chinaNames)
+        assertTrue("transaction_log" in chinaNames)
         assertTrue("get_genshin_diary" in chinaNames)
     }
 

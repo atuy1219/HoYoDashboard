@@ -17,7 +17,7 @@ enum class ApiGame {
 enum class ApiScope {
     RECORD, CARD, LEDGER, ZZZ_LEDGER, CULTIVATE, REWARD, CALCULATOR,
     LINEUP, HSR_LINEUP, HSR_WARP, CARD_PLAZA, BOULEUTERION, TEAPOT, WIKI,
-    GACHA, TRANSACTION, BBS, MIMO, WEBSTATIC, ANNOUNCEMENT
+    GACHA, TRANSACTION, BBS, MIMO, WEBSTATIC, ANNOUNCEMENT, ACCOUNTS
 }
 
 data class ApiMethod(
@@ -100,7 +100,7 @@ object UpstreamCatalog {
         r("get_lost_void_summary", "零号ホロウ", "戦闘記録", ApiGame.ZZZ, ApiScope.RECORD, "abysss2_abstract", useUidParam = true),
         r("get_threshold_simulation_brief", "閾値シミュレーション概要", "戦闘記録", ApiGame.ZZZ, ApiScope.RECORD, "void_front_battle_period_abstract_info", defaults = mapOf("schedule_type" to "1"), useUidParam = true),
         r("get_threshold_simulation", "閾値シミュレーション詳細", "戦闘記録", ApiGame.ZZZ, ApiScope.RECORD, "void_front_battle_period_detail", defaults = mapOf("schedule_type" to "1"), useUidParam = true),
-        r("chronicle_signal_history", "変調履歴", "ガチャ", ApiGame.ZZZ, ApiScope.RECORD, "gacha_record", defaults = mapOf("end_id" to "0"), required = setOf("gacha_type"), useUidParam = true),
+        r("chronicle_signal_history", "変調履歴", "ガチャ", ApiGame.ZZZ, ApiScope.RECORD, "gacha_record", defaults = mapOf("end_id" to "0"), useUidParam = true),
         r("get_zzz_event_calendar", "イベントカレンダー", "イベント", ApiGame.ZZZ, ApiScope.RECORD, "activity_calendar", useUidParam = true),
         r("get_zzz_gacha_calendar", "変調カレンダー", "ガチャ", ApiGame.ZZZ, ApiScope.RECORD, "gacha_calendar", useUidParam = true),
         r("get_zzz_gacha_info", "現在の変調情報", "ガチャ", ApiGame.ZZZ, ApiScope.RECORD, "cur_gacha_detail", useUidParam = true),
@@ -116,6 +116,7 @@ object UpstreamCatalog {
         r("get_honkai_memorial_arena", "記憶戦場", "戦闘記録", ApiGame.HONKAI, ApiScope.RECORD, "battleFieldReport"),
         r("get_honkai_notes", "リアルタイムノート", "デイリー", ApiGame.HONKAI, ApiScope.RECORD, "note"),
 
+        r("get_game_accounts", "連携中のゲームアカウント", "HoYoLAB", null, ApiScope.ACCOUNTS, "binding/api/getUserGameRolesByCookie"),
         r("get_record_cards", "ゲームアカウント一覧", "HoYoLAB", null, ApiScope.CARD, "getGameRecordCard"),
 
         r("get_reward_info", "デイリーチェックイン状況", "HoYoLAB", null, ApiScope.REWARD, "info"),
@@ -126,13 +127,18 @@ object UpstreamCatalog {
         r("genshin_diary_log", "原神通貨の明細", "月次記録", ApiGame.GENSHIN, ApiScope.LEDGER, "month_detail", defaults = mapOf("type" to "1", "current_page" to "1", "page_size" to "100")),
         r("starrail_diary_log", "スタレ通貨の明細", "月次記録", ApiGame.STARRAIL, ApiScope.LEDGER, "month_detail", defaults = mapOf("type" to "1", "current_page" to "1", "page_size" to "100")),
 
-        r("get_calculator_characters", "育成計算・キャラクター一覧", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/avatar/list", "READ_POST", defaults = mapOf("uid" to "{uid}", "region" to "{server}", "page" to "1", "size" to "200")),
+        r("get_calculator_characters", "育成計算・キャラクター一覧", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/avatar/list", "READ_POST", defaults = mapOf("element_attr_ids" to "[]", "weapon_cat_ids" to "[]", "page" to "1", "size" to "200")),
         r("get_calculator_weapons", "育成計算・武器一覧", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/weapon/list", "READ_POST", defaults = mapOf("page" to "1", "size" to "200")),
-        r("get_calculator_artifacts", "育成計算・聖遺物一覧", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/reliquary/list", "READ_POST", defaults = mapOf("page" to "1", "size" to "200")),
+        r("get_calculator_artifacts", "育成計算・聖遺物一覧", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/reliquary/list", "READ_POST", defaults = mapOf("page" to "1", "size" to "200", "reliquary_cat_id" to "1")),
         r("get_calculator_furnishings", "育成計算・調度品一覧", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/furniture/list", "READ_POST", defaults = mapOf("page" to "1", "size" to "200")),
         r("get_character_details", "育成計算・キャラ詳細", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/sync/avatar/detail", required = setOf("avatar_id")),
         r("get_complete_artifact_set", "聖遺物セット", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/reliquary/set", required = setOf("reliquary_id")),
         r("get_teapot_replica_blueprint", "調度品設計図", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/furniture/blueprint", required = setOf("share_code")),
+
+        r("calculate_enhancement", "育成素材を計算", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/compute", "READ_POST"),
+        r("calculate_batch_enhancement", "まとめて育成素材を計算", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v3/batch_compute", "READ_POST", required = setOf("items")),
+        r("calculate_furnishings", "調度品の素材を計算", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v1/furniture/compute", "READ_POST", required = setOf("list")),
+        r("get_owned_calculator_characters", "所持キャラクターの育成状況", "育成計算", ApiGame.GENSHIN, ApiScope.CALCULATOR, "v2/sync/avatar/list", "READ_POST", defaults = mapOf("uid" to "{uid}", "region" to "{server}", "page" to "1", "size" to "200")),
 
         r("get_lineup_fields", "編成シミュレーター設定", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "config"),
         r("get_lineup_scenarios", "編成シナリオ", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "tags"),
@@ -149,14 +155,15 @@ object UpstreamCatalog {
         r("get_tcg_deck", "デッキ詳細", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "detail", required = setOf("id")),
         r("get_tcg_deck_comments", "デッキコメント", "七聖召喚", ApiGame.GENSHIN, ApiScope.BOULEUTERION, "account/reply/list", defaults = mapOf("app_id" to "10034", "game_biz" to "hk4e", "next" to "0", "mode" to "3"), required = setOf("entity_key")),
 
-        r("teapot_replicas", "塵歌壺レプリカ", "塵歌壺", ApiGame.GENSHIN, ApiScope.TEAPOT, "list", defaults = mapOf("page" to "1", "page_size" to "20")),
-        r("get_wiki_previews", "Wiki記事一覧", "Wiki", null, ApiScope.WIKI, "get_entry_page_list", "READ_POST", required = setOf("menu_id")),
+        r("teapot_replicas", "塵歌壺レプリカ", "塵歌壺", ApiGame.GENSHIN, ApiScope.TEAPOT, "list", defaults = mapOf("page" to "1", "page_size" to "20", "zip_type" to "1", "block_id" to "", "module_id" to "", "target_region" to "", "version" to "")),
+        r("get_wiki_previews", "Wiki記事一覧", "Wiki", null, ApiScope.WIKI, "get_entry_page_list", "READ_POST", defaults = mapOf("page_num" to "1", "page_size" to "1000", "filters" to "[]", "use_es" to "true"), required = setOf("menu_id")),
         r("get_wiki_page", "Wiki記事", "Wiki", null, ApiScope.WIKI, "entry_page", required = setOf("entry_page_id")),
         r("get_wiki_pages", "複数Wiki記事", "Wiki", null, ApiScope.WIKI, "entry_pages", "READ_POST", required = setOf("entry_page_ids")),
 
         r("get_starrail_lineup_game_modes", "スタレ編成モード", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "tag"),
         r("get_starrail_lineups", "スタレ編成一覧", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "lineup/index", defaults = mapOf("next_page_token" to "", "order" to "Match", "game" to "hkrpg"), required = setOf("tag_id", "group_id", "type")),
-        r("get_starrail_lineup_schedules", "忘却の庭・開催期間", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "schedule/challenge"),
+        r("get_starrail_lineup_schedules", "編成シミュレーター開催期間", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "schedule/list", defaults = mapOf("type" to "Chasm")),
+        r("get_starrail_lineup_floor", "編成シミュレーターの階層", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "tag", required = setOf("type", "floor")),
         r("get_genshin_announcements", "原神のお知らせ", "お知らせ", ApiGame.GENSHIN, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),
         r("get_starrail_announcements", "スタレのお知らせ", "お知らせ", ApiGame.STARRAIL, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),
         r("get_zzz_announcements", "ゼンゼロのお知らせ", "お知らせ", ApiGame.ZZZ, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),

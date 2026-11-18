@@ -15,7 +15,8 @@ data class UpstreamActionDefinition(
 
 class UpstreamActions(
     private val language: String = "ja-jp",
-    private val transport: ApiTransport = ApiTransport()
+    private val transport: ApiTransport = ApiTransport(),
+    private val api: UpstreamApiClient = UpstreamApiClient(language, transport = transport)
 ) {
 
     fun availableActions(account: ApiAccount): List<UpstreamActionDefinition> {
@@ -24,10 +25,11 @@ class UpstreamActions(
             UpstreamActionDefinition("redeem_code", "交換コード", listOf("code")),
             UpstreamActionDefinition("update_settings", "プロフィール公開設定", listOf("setting_id", "public"), true),
             UpstreamActionDefinition("set_top_genshin_characters", "原神の注目キャラクター", listOf("character_ids")),
-            UpstreamActionDefinition("finish_mimo_task", "Mimoタスク完了", listOf("task_id", "game_id", "version_id")),
-            UpstreamActionDefinition("claim_mimo_task_reward", "Mimo報酬受け取り", listOf("task_id", "game_id", "version_id")),
-            UpstreamActionDefinition("buy_mimo_shop_item", "Mimoショップ交換", listOf("item_id", "game_id", "version_id"), true),
-            UpstreamActionDefinition("draw_mimo_lottery", "Mimo抽選", listOf("game_id", "version_id"), true),
+            UpstreamActionDefinition("set_calculator_sync", "育成計算の所持データ連携", listOf("public"), true),
+            UpstreamActionDefinition("finish_mimo_task", "Mimoタスク完了", listOf("task_id")),
+            UpstreamActionDefinition("claim_mimo_task_reward", "Mimo報酬受け取り", listOf("task_id")),
+            UpstreamActionDefinition("buy_mimo_shop_item", "Mimoショップ交換", listOf("item_id"), true),
+            UpstreamActionDefinition("draw_mimo_lottery", "Mimo抽選", emptyList(), true),
             UpstreamActionDefinition("reply_to_post", "HoYoLABに返信", listOf("post_id", "content"), true),
             UpstreamActionDefinition("delete_reply", "HoYoLAB返信削除", listOf("reply_id", "post_id"), true),
             UpstreamActionDefinition("join_topic", "HoYoLABトピック参加", listOf("topic_id")),
@@ -43,7 +45,7 @@ class UpstreamActions(
             when (action.name) {
                 "redeem_code" -> account.region == ApiRegion.OVERSEAS && account.game != ApiGame.HONKAI
                 "update_settings" -> account.game != ApiGame.TOT
-                "set_top_genshin_characters" -> account.game == ApiGame.GENSHIN
+                "set_top_genshin_characters", "set_calculator_sync" -> account.game == ApiGame.GENSHIN
                 "finish_mimo_task", "claim_mimo_task_reward", "buy_mimo_shop_item", "draw_mimo_lottery",
                 "accompany_character", "browse_accompany_post", "set_accompany_voice_setting" ->
                     account.region == ApiRegion.OVERSEAS
@@ -76,11 +78,16 @@ class UpstreamActions(
         require(availableActions(account).any { it.name == name }) {
             "Action is not available for this account: " + name
         }
+        val mimoGame = if (name in setOf("finish_mimo_task", "claim_mimo_task_reward", "buy_mimo_shop_item", "draw_mimo_lottery") &&
+            (arguments["game_id"].isNullOrBlank() || arguments["version_id"].isNullOrBlank())
+        ) api.mimoGame(cookie, account, arguments["game_id"]?.toIntOrNull()) else null
+        fun mimoId(key: String): Int = mimoGame?.getInt(key) ?: int(key)
         return when (name) {
             "claim_daily_reward" -> claimDailyReward(
                 cookie, account,
                 arguments.filterKeys { it in setOf("geetest_challenge", "geetest_validate", "geetest_seccode") }
             )
+            "set_calculator_sync" -> setCalculatorSync(cookie, account, bool("public"))
             "redeem_code" -> redeemCode(cookie, account, required("code"))
             "update_settings" -> updateSettings(cookie, account, int("setting_id"), bool("public"))
             "set_top_genshin_characters" -> setTopGenshinCharacters(
@@ -88,10 +95,10 @@ class UpstreamActions(
                 required("character_ids").split(',').map { it.trim().toIntOrNull()
                     ?: throw IllegalArgumentException("character_ids must be comma-separated integers") }
             )
-            "finish_mimo_task" -> finishMimoTask(cookie, account, long("task_id"), int("game_id"), int("version_id"))
-            "claim_mimo_task_reward" -> claimMimoTaskReward(cookie, account, long("task_id"), int("game_id"), int("version_id"))
-            "buy_mimo_shop_item" -> buyMimoShopItem(cookie, account, long("item_id"), int("game_id"), int("version_id"))
-            "draw_mimo_lottery" -> drawMimoLottery(cookie, account, int("game_id"), int("version_id"))
+            "finish_mimo_task" -> finishMimoTask(cookie, account, long("task_id"), mimoId("game_id"), mimoId("version_id"))
+            "claim_mimo_task_reward" -> claimMimoTaskReward(cookie, account, long("task_id"), mimoId("game_id"), mimoId("version_id"))
+            "buy_mimo_shop_item" -> buyMimoShopItem(cookie, account, long("item_id"), mimoId("game_id"), mimoId("version_id"))
+            "draw_mimo_lottery" -> drawMimoLottery(cookie, account, mimoId("game_id"), mimoId("version_id"))
             "reply_to_post" -> replyToPost(cookie, account, long("post_id"), required("content"))
             "delete_reply" -> deleteReply(cookie, account, long("reply_id"), long("post_id"))
             "join_topic" -> joinTopic(cookie, account, long("topic_id"))
@@ -211,6 +218,20 @@ class UpstreamActions(
         )
     }
 
+    suspend fun setCalculatorSync(cookie: String, account: ApiAccount, enabled: Boolean): JSONObject {
+        require(account.game == ApiGame.GENSHIN)
+        val mainland = account.region == ApiRegion.CHINESE
+        val prefix = if (mainland) "https://api-takumi.mihoyo.com" else "https://sg-public-api.hoyolab.com"
+        val referer = if (mainland) "https://webstatic.mihoyo.com/ys/event/e20200923adopt_calculator/index.html"
+            else "https://act.hoyolab.com/"
+        return transport.send(prefix, "event/e20200928calculate/v1/avatar/auth", cookie, account.region,
+            language, "POST", emptyMap(), JSONObject().put("avatar_auth", if (enabled) 1 else 0).put("lang", language),
+            mapOf("Referer" to referer))
+    }
+
+    suspend fun setVisibility(cookie: String, account: ApiAccount, public: Boolean): JSONObject =
+        updateSettings(cookie, account, 1, public)
+
     suspend fun setTopGenshinCharacters(
         cookie: String,
         account: ApiAccount,
@@ -254,11 +275,13 @@ class UpstreamActions(
     ): JSONObject {
         require(account.region == ApiRegion.OVERSEAS)
         val url = "https://sg-public-api.hoyolab.com/event/e2023mimotravel"
-        val path = if (gameId == 2) "qiuqiu/" + endpoint.replace('-', '_') else endpoint
+        val path = if (gameId == 2 || account.game == ApiGame.GENSHIN) "qiuqiu/" + endpoint.replace('-', '_') else endpoint
         val data = args + mapOf(
             "game_id" to gameId.toString(), "version_id" to versionId.toString(), "lang" to language
         )
-        val body = if (post && endpoint != "receive-point") JSONObject(data) else null
+        val body = if (post && endpoint != "receive-point") JSONObject().apply {
+            data.forEach { (key, value) -> put(key, value.toLongOrNull() ?: value) }
+        } else null
         return transport.send(
             url, path, cookie, account.region, language,
             if (post) "POST" else "GET",
@@ -275,7 +298,8 @@ class UpstreamActions(
             .put("image_list", JSONArray())
             .put("reply_bubble_id", "")
             .put("structured_content", JSONArray().put(JSONObject().put("insert", content + "\n")).toString())
-        return community(cookie, account, "community/post/wapi/releaseReply", body)
+        return community(cookie, account, "community/post/wapi/releaseReply", body,
+            mapOf("x-rpc-device_id" to UUID.randomUUID().toString()))
     }
 
     suspend fun deleteReply(cookie: String, account: ApiAccount, replyId: Long, postId: Long): JSONObject =
@@ -296,7 +320,7 @@ class UpstreamActions(
         require(account.region == ApiRegion.OVERSEAS)
         return transport.send(
             "https://bbs-api-os.hoyolab.com", "community/apihub/api/user/accompany/role",
-            cookie, account.region, language, "GET",
+            withStuid(cookie), account.region, language, "GET",
             mapOf("role_id" to roleId.toString(), "topic_id" to topicId.toString()), null,
             mapOf("Referer" to "https://www.hoyolab.com/"), rpcHeaders = true, signed = true
         )
@@ -308,7 +332,7 @@ class UpstreamActions(
         require(account.region == ApiRegion.OVERSEAS)
         return transport.send(
             "https://bbs-api-os.hoyolab.com", "community/post/api/getPostFull",
-            cookie, account.region, language, "GET",
+            withStuid(cookie), account.region, language, "GET",
             mapOf(
                 "post_id" to postId.toString(), "source_topic_id" to topicId.toString(),
                 "source_type" to "SourceType_Role"
@@ -331,14 +355,15 @@ class UpstreamActions(
     }
 
     private suspend fun community(
-        cookie: String, account: ApiAccount, endpoint: String, body: JSONObject
+        cookie: String, account: ApiAccount, endpoint: String, body: JSONObject,
+        headers: Map<String, String> = emptyMap()
     ): JSONObject {
         val base = if (account.region == ApiRegion.CHINESE) {
             "https://bbs-api.mihoyo.com"
         } else "https://bbs-api-os.hoyolab.com"
         return transport.send(
             base, endpoint, cookie, account.region, language, "POST", emptyMap(), body,
-            mapOf("Referer" to if (account.region == ApiRegion.CHINESE) "https://bbs.mihoyo.com/" else "https://www.hoyolab.com/"),
+            mapOf("Referer" to if (account.region == ApiRegion.CHINESE) "https://bbs.mihoyo.com/" else "https://www.hoyolab.com/") + headers,
             rpcHeaders = true, signed = true
         )
     }

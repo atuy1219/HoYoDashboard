@@ -36,7 +36,7 @@ class UpstreamPaginator(private val client: UpstreamApiClient) {
             if (spec.cursorParameter in setOf("page", "current_page") && cursor.isNullOrEmpty()) {
                 query[spec.cursorParameter] = "1"
             }
-            val response = client.call(cookie, account, method, query)
+            val response = client.callPage(cookie, account, method, query)
             emit(response)
             page++
 
@@ -50,13 +50,19 @@ class UpstreamPaginator(private val client: UpstreamApiClient) {
                 rows.optJSONObject(rows.length() - 1)?.opt(field)?.toString().orEmpty()
             }.orEmpty()
             val nextCursor = responseCursor.ifBlank { lastItemCursor }
+            val total = response.optInt("total", -1)
             val isPageNumber = spec.cursorParameter == "page" || spec.cursorParameter == "current_page"
             val hasMore = when {
                 response.has(spec.moreField) -> response.optBoolean(spec.moreField)
                 response.has("is_end") -> !response.optBoolean("is_end")
                 isPageNumber -> {
                     val size = spec.pageSize
-                    if (size != null) rows.length() >= size else rows.length() > 0
+                    when {
+                        rows.length() == 0 -> false
+                        size != null && total >= 0 -> (cursor?.toLongOrNull() ?: 1) * size < total
+                        size != null -> rows.length() >= size
+                        else -> true
+                    }
                 }
                 spec.pageSize != null -> rows.length() >= spec.pageSize
                 else -> nextCursor.isNotBlank()

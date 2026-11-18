@@ -2,6 +2,7 @@ package com.atuy.hoyodashboard.api
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.toList
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -50,7 +51,13 @@ class UpstreamFeatureClient(
             ApiGame.HONKAI -> "get_honkai_battlesuits"
             ApiGame.TOT -> throw UnsupportedOperationException("Tears of Themis has no character Chronicle API.")
         }
-        return raw(method).jsonList()
+        val response = raw(method)
+        val characters = response.jsonList()
+        return if (account.game == ApiGame.GENSHIN) {
+            characters.map { character ->
+                decorateGenshinCharacter(character, response.optJSONObject("property_map"))
+            }
+        } else characters
     }
 
     suspend fun fullBattleRecord(): JSONObject = when (account.game) {
@@ -93,17 +100,20 @@ class UpstreamFeatureClient(
 
     suspend fun gachaHistory(
         limit: Int? = null,
-        perBannerLimit: Int? = null
+        perBannerLimit: Int? = null,
+        authKey: String? = null,
+        miliastra: Boolean = false
     ): List<GachaRecord> {
         val method = when (account.game) {
-            ApiGame.GENSHIN -> "wish_history"
+            ApiGame.GENSHIN -> if (miliastra) "mw_wish_history" else "wish_history"
             ApiGame.STARRAIL -> "warp_history"
-            ApiGame.ZZZ -> "signal_history"
+            ApiGame.ZZZ -> if (authKey.isNullOrBlank()) "chronicle_signal_history" else "signal_history"
             else -> throw UnsupportedOperationException("Gacha history is not available for " + account.game)
         }
         val args = buildMap {
             limit?.takeIf { it > 0 }?.let { put("limit", it.toString()) }
             perBannerLimit?.takeIf { it > 0 }?.let { put("per_banner_limit", it.toString()) }
+            authKey?.takeIf(String::isNotBlank)?.let { put("authkey", it) }
         }
         val response = raw(method, args)
         return UpstreamModelParser.gachaHistory(response, 0)
@@ -142,8 +152,16 @@ class UpstreamFeatureClient(
         val monthValue = if (account.game == ApiGame.GENSHIN) {
             month.toIntOrNull()?.toString() ?: throw IllegalArgumentException("Genshin month must be 1-12.")
         } else month
-        val response = raw(method, mapOf("month" to monthValue, "type" to type.toString()))
-        return response.jsonList()
+        val currency = if (account.game == ApiGame.ZZZ) {
+            require(type in 1..3) { "通貨を選択してください" }
+            listOf("PolychromesData", "MatserTapeData", "BooponsData")[type - 1]
+        } else type.toString()
+        val arguments = mapOf("month" to monthValue, "type" to currency)
+        if (account.game != ApiGame.ZZZ) return raw(method, arguments).jsonList()
+        return UpstreamPaginator(api).items(
+            cookieProvider(), account, checkNotNull(UpstreamCatalog.find(method)), arguments,
+            PageSpec(cursorParameter = "current_page", pageSize = 20)
+        ).toList()
     }
 
     suspend fun rewardStatus(): JSONObject = raw("get_reward_info")
@@ -234,6 +252,35 @@ class UpstreamFeatureClient(
 }
 
 private fun JSONObject.jsonList(): List<JSONObject> {
-    val rows = optJSONArray("list") ?: optJSONArray("avatar_list") ?: JSONArray()
+    val rows = optJSONArray("list") ?: optJSONArray("avatar_list") ?: optJSONArray("avatars")
+        ?: optJSONArray("characters") ?: JSONArray()
     return (0 until rows.length()).mapNotNull { rows.optJSONObject(it) }
+}
+
+internal fun decorateGenshinCharacter(row: JSONObject, propertyMap: JSONObject?): JSONObject {
+    fun decorate(element: Any?): Any? = when (element) {
+        is JSONObject -> JSONObject().apply {
+            element.keys().forEach { key -> put(key, decorate(element.opt(key))) }
+            if (has("property_type")) {
+                val info = propertyMap?.optJSONObject(optString("property_type"))
+                val name = info?.optString("name").orEmpty()
+                if (name.isNotBlank()) {
+                    put("name", name)
+                    remove("property_type")
+                }
+                info?.optString("icon")?.takeIf { it.isNotBlank() }?.let { put("icon", it) }
+            }
+        }
+        is JSONArray -> JSONArray().apply {
+            for (index in 0 until element.length()) put(decorate(element.opt(index)))
+        }
+        else -> element
+    }
+    val output = decorate(row) as JSONObject
+    val base = output.optJSONObject("base") ?: return output
+    base.keys().forEach { key ->
+        if (!output.has(key)) output.put(key, base.opt(key))
+    }
+    output.remove("base")
+    return output
 }

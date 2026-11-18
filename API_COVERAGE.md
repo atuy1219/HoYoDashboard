@@ -1,32 +1,11 @@
 # API coverage
 
-## Implemented
+Reference: genshin.py 1.7.32. See [UPSTREAM.md](UPSTREAM.md).
 
-- [x] 117 mapped read-only upstream operations across Genshin Impact, Honkai: Star Rail, Zenless Zone Zero, Honkai Impact 3rd, and shared HoYoLAB APIs
-- [x] Native HTTPS request transport with official-host validation
-- [x] Overseas and mainland-China routing where the upstream API exposes a route, with explicit guards for global-only Mimo and companion endpoints
-- [x] Cookie storage encrypted with Android Keystore AES-GCM
-- [x] WebView login for HoYoLAB and 米游社
-- [x] Cookie refresh for supported global and mainland legacy/v2 sessions
-- [x] Badge-token acquisition for Star Rail and ZZZ
-- [x] Authkey generation for supported overseas gacha and transaction endpoints
-- [x] Cursor and page-number pagination with Kotlin Flow
-- [x] Aggregation of all Genshin, Star Rail, and ZZZ gacha pools before applying history limits
-- [x] Aggregation of all Genshin transaction categories before applying history limits
-- [x] Typed core models for profiles, character previews, gacha records, diary summaries, rewards, and transaction rows
-- [x] Dedicated tabs for account overview, characters and build data, all supported battle modes, gacha history with per-banner pity summaries, and monthly records
-- [x] UI for daily check-in, code redemption, and the currently implemented account write operations
-- [x] Confirmation gates for destructive or value-consuming account actions
-- [x] Unit tests for catalog coverage, pagination merge ordering, nested diary parsing, numeric featured flags, and account/region-scoped operations
+- Game accounts, Battle Chronicle, real-time notes, reward status and redemption, diaries, transactions and gacha, event calendars and announcements.
+- Calculator catalogs, owned character data, individual and batch enhancement, furnishing and replica materials, lineup schedules, TCG, Wiki, Mimo and companions.
+- Native authentication clients for web/app password login, SMS, email verification, QR sessions, Geetest requests, and game login. The Android sign-in screen runs the official HoYoLAB or 米游社 WebView flow.
+- Android results use Japanese labels, item and character images, grouped details and drill-downs where the API supplies identifiers. Kotlin keeps the original response accessible for endpoints without dedicated data classes.
+- Overseas and mainland routes follow the pinned upstream where implemented. Mainland gacha and transaction history can take a caller-supplied authkey. Global-only features retain regional availability checks.
 
-## Remaining compatibility work
-
-- [ ] Live authenticated verification of every mapped operation and region
-- [ ] Typed Kotlin models for every upstream response (raw JSON is still retained for less common APIs)
-- [ ] Dedicated native UI for every game feature and every HoYoLAB endpoint; the API explorer remains the fallback for less common operations
-- [ ] Full parity for upstream authentication helpers (password, QR, phone, email, Geetest and other challenge flows); the app currently delegates login to official WebView pages
-- [ ] Additional upstream write-operation parity beyond the implemented action set
-- [ ] China-region gaps where the upstream service has no supported route, including selected announcement, ZZZ ledger, and teapot endpoints
-- [ ] Contract tests against captured, sanitized upstream responses
-
-API definitions are not proof of live compatibility. A successful GitHub Actions build verifies compilation and unit tests, not authenticated access to HoYoverse services.
+`testDebugUnitTest` includes request and response fixtures for calculator pages and payloads, TCG effects, monthly diaries, lineup schedules, sign-in steps and gacha history. Authenticated live verification is pending. Dedicated Kotlin model coverage and per-method option parity are incomplete.

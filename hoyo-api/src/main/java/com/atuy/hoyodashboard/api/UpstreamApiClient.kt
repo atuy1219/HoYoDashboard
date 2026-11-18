@@ -9,7 +9,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
-import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -49,12 +48,14 @@ class UpstreamApiClient(
             "get_accompany_voice_setting"
         )
         return available(account.game).filterNot { method ->
+            if (method.name == "get_banner_details" && account.game !in setOf(ApiGame.GENSHIN, ApiGame.STARRAIL)) {
+                return@filterNot true
+            }
             account.region == ApiRegion.CHINESE && (
                 method.scope in setOf(
                     ApiScope.MIMO, ApiScope.ANNOUNCEMENT, ApiScope.TEAPOT, ApiScope.ZZZ_LEDGER
                 ) ||
-                    method.name in globalOnlyNames ||
-                    (method.authKeyRequired && method.scope in setOf(ApiScope.GACHA, ApiScope.TRANSACTION))
+                    method.name in globalOnlyNames
                 )
         }
     }
@@ -76,6 +77,23 @@ class UpstreamApiClient(
         method: ApiMethod,
         arguments: Map<String, String> = emptyMap()
     ): JSONObject {
+        return request(cookie, account, method, arguments, aggregate = true)
+    }
+
+    internal suspend fun callPage(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod,
+        arguments: Map<String, String>
+    ): JSONObject = request(cookie, account, method, arguments, aggregate = false)
+
+    private suspend fun request(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod,
+        arguments: Map<String, String>,
+        aggregate: Boolean
+    ): JSONObject {
         require(method.readOnly) { "Write operations require a separate explicit API." }
         if (account.region == ApiRegion.CHINESE && (
             method.scope == ApiScope.MIMO ||
@@ -96,13 +114,21 @@ class UpstreamApiClient(
             "Endpoint not supported for " + account.game
         }
         if (method.scope == ApiScope.ANNOUNCEMENT) {
-            return announcements(cookie, account, method)
+            return announcements(cookie, account, arguments)
+        }
+        if (method.name == "get_starrail_lineup_floor") {
+            val type = arguments["type"] ?: error("ゲームモードを選択してください")
+            val floor = arguments["floor"]?.toIntOrNull() ?: error("階層を入力してください")
+            val modes = call(cookie, account, "get_starrail_lineup_game_modes")
+            val mode = modes.optJSONArray("tree").objects().firstOrNull { it.optString("root_type") == type }
+            return mode?.optJSONArray("children")?.optJSONObject(0)?.optJSONArray("children").objects()
+                .firstOrNull { it.optJSONObject("extend")?.optInt("floor") == floor } ?: JSONObject()
         }
         if (method.name == "get_genshin_banner_ids") {
             val response = transport.send(
                 route(ApiScope.WEBSTATIC, account.game, ApiRegion.CHINESE),
                 method.endpoint,
-                cookie,
+                "",
                 ApiRegion.CHINESE,
                 language,
                 "GET",
@@ -140,11 +166,13 @@ class UpstreamApiClient(
             val details = JSONArray()
             for (i in 0 until ids.length()) {
                 val bannerId = ids.opt(i)?.toString().orEmpty()
-                if (bannerId.isBlank()) continue
+                require(bannerId.matches(Regex("[a-zA-Z0-9_-]+")) && lang.matches(Regex("[a-zA-Z-]+"))) {
+                    "バナーIDまたは言語が無効です"
+                }
                 val path = "gacha_info/$gameName/$serverName/$bannerId/$lang.json"
                 val item = transport.send(
                     route(ApiScope.WEBSTATIC, account.game, account.region),
-                    path, cookie, account.region, language, "GET", emptyMap(), null
+                    path, "", account.region, language, "GET", emptyMap(), null
                 )
                 details.put(JSONObject(item.toString()).put("banner_id", bannerId))
             }
@@ -161,30 +189,29 @@ class UpstreamApiClient(
             }
             return names
         }
-        if (method.name in setOf("wish_history", "mw_wish_history", "warp_history", "signal_history") &&
-            arguments["gacha_type"].isNullOrBlank()
+        if (aggregate && method.name in setOf(
+            "wish_history", "mw_wish_history", "warp_history", "signal_history", "chronicle_signal_history"
+        )
         ) {
             return allGachaHistory(cookie, account, method, arguments)
         }
-        if (method.name == "transaction_log" && arguments["kind"].isNullOrBlank()) {
+        if (aggregate && method.name == "transaction_log") {
             return allTransactionHistory(cookie, account, method, arguments)
         }
         val pageSizes = mapOf(
             "claimed_rewards" to 10,
             "genshin_diary_log" to 100,
             "starrail_diary_log" to 100,
-            "get_zzz_diary_detail" to 20,
             "get_lineups" to 20,
-            "get_starrail_lineups" to 20,
             "get_tcg_decks" to 20,
             "teapot_replicas" to 20,
-            "get_mimo_point_history" to 20,
             "get_calculator_characters" to 200,
+            "get_owned_calculator_characters" to 200,
             "get_calculator_weapons" to 200,
             "get_calculator_artifacts" to 200,
             "get_calculator_furnishings" to 200
         )
-        pageSizes[method.name]?.let { pageSize ->
+        if (aggregate) pageSizes[method.name]?.let { pageSize ->
             return collectPages(cookie, account, method, arguments, pageSize)
         }
         if (method.name == "get_full_genshin_user") {
@@ -212,38 +239,29 @@ class UpstreamApiClient(
         if (method.name == "get_tcg_cards") {
             val characterMethod = method.copy(name = "tcg_character_cards", endpoint = "roles", verb = "GET")
             val characterData = call(cookie, account, characterMethod)
-            val characterRows = characterData.optJSONArray("list") ?: JSONArray()
-            val cards = JSONArray()
-            for (i in 0 until characterRows.length()) cards.put(characterRows.opt(i))
-            val ids = JSONArray()
-            for (i in 0 until characterRows.length()) {
-                val id = characterRows.optJSONObject(i)?.optInt("id", 0) ?: 0
-                if (id > 0) ids.put(id)
-            }
+            val characterRows = characterData.optJSONArray("roles").objects()
+            val cards = JSONArray(characterRows)
+            val ids = JSONArray(characterRows.mapNotNull { it.optInt("id").takeIf { id -> id > 0 } })
             if (ids.length() > 0) {
                 val actionMethod = method.copy(
                     name = "tcg_action_cards", endpoint = "actions",
                     verb = "READ_POST", required = setOf("role_ids")
                 )
                 val actionData = call(cookie, account, actionMethod, mapOf("role_ids" to ids.toString()))
-                val actionRows = actionData.optJSONArray("list") ?: JSONArray()
-                for (i in 0 until actionRows.length()) cards.put(actionRows.opt(i))
+                actionData.optJSONArray("actions").objects().forEach { cards.put(it) }
             }
             return JSONObject().put("list", cards)
         }
-        if (method.name == "get_tcg_deck_comments") {
+        if (aggregate && method.name == "get_tcg_deck_comments") {
             return allTcgDeckComments(cookie, account, method, arguments)
-        }
-        if (method.name == "get_accompany_character_posts") {
-            return allAccompanyPosts(cookie, account, method, arguments)
         }
         if (method.name == "get_all_zzz_agent_upgrade_guides") {
             val agents = call(cookie, account, "get_zzz_upgrade_guide_agents")
             val rows = agents.optJSONArray("list") ?: JSONArray()
             val results = JSONArray()
-            val ids = (0 until rows.length()).mapNotNull {
-                rows.optJSONObject(it)?.optInt("id", 0)?.takeIf { id -> id > 0 }
-            }
+            val unlockedOnly = arguments["unlocked_only"]?.toBooleanStrictOrNull() ?: true
+            val ids = rows.objects().filter { !unlockedOnly || it.optBoolean("unlocked") }
+                .mapNotNull { row -> (row.optJSONObject("avatar") ?: row).optInt("id").takeIf { it > 0 } }
             for (batch in ids.chunked(10)) {
                 val avatarList = JSONArray()
                 batch.forEach { id ->
@@ -303,30 +321,18 @@ class UpstreamApiClient(
             return JSONObject().put("avatar_list", details)
         }
         if (method.name == "get_threshold_simulation" && arguments["void_front_id"].isNullOrBlank()) {
-            val brief = call(cookie, account, "get_threshold_simulation_brief")
+            val response = call(cookie, account, "get_threshold_simulation_brief", arguments)
+            val brief = response.optJSONObject("void_front_battle_abstract_info_brief") ?: response
             val id = brief.optString("id").ifBlank { brief.optString("void_front_id") }
-            if (id.isBlank()) return brief
+            if (id.isBlank()) return response
             return call(
                 cookie, account, method.copy(name = "get_threshold_simulation_raw"),
                 arguments + ("void_front_id" to id)
             )
         }
         if (method.name == "get_mimo_point_count") {
-            val data = call(cookie, account, "get_mimo_games")
-            val rows = data.optJSONArray("list") ?: data.optJSONArray("act_list") ?: JSONArray()
-            val targetId = when (account.game) {
-                ApiGame.GENSHIN -> 2
-                ApiGame.STARRAIL -> 6
-                ApiGame.ZZZ -> 8
-                ApiGame.HONKAI -> -1
-                ApiGame.TOT -> -1
-            }
-            val item = (0 until rows.length()).asSequence().mapNotNull { index ->
-                val row = rows.optJSONObject(index) ?: return@mapNotNull null
-                row.optJSONObject("act_info") ?: row
-            }.firstOrNull { it.optInt("game_id", it.optInt("id")) == targetId }
-                ?: throw HoYoApiException("No Mimo point account for " + account.game)
-            return JSONObject().put("point", item.optInt("point"))
+            val game = mimoGame(cookie, account, arguments["game_id"]?.toIntOrNull())
+            return JSONObject().put("point", game.optInt("point"))
         }
         val params = method.defaults.mapValues { (_, value) ->
             value.replace("{uid}", account.uid).replace("{server}", account.server)
@@ -341,10 +347,31 @@ class UpstreamApiClient(
                 ?: cookieValues["account_id_v2"] ?: cookieValues["account_id"]
                 ?: throw IllegalArgumentException("HoYoLAB account ID is missing from cookies.")
         }
+        if (method.scope == ApiScope.MIMO && method.required.any { it == "game_id" }) {
+            if (params["game_id"].isNullOrBlank() && params["version_id"].isNullOrBlank()) {
+                val game = mimoGame(cookie, account)
+                params["game_id"] = game.getString("game_id")
+                params["version_id"] = game.getString("version_id")
+            }
+        }
+        if (method.endpoint == "gacha_record") {
+            val type = params["gacha_type"]
+            val map = mapOf(
+                "1" to "GACHA_TYPE_PERMANENT", "2" to "GACHA_TYPE_CHARACTER_UP", "3" to "GACHA_TYPE_WEAPON_UP",
+                "5" to "GACHA_TYPE_BANGBOO", "102" to "GACHA_TYPE_CHARACTER_RETURN", "103" to "GACHA_TYPE_WEAPON_RETURN"
+            )
+            map[type]?.let { params["gacha_type"] = it }
+        }
+        if (method.name == "teapot_replicas") {
+            val page = params.remove("page")?.toIntOrNull() ?: 1
+            val size = params.remove("page_size")?.toIntOrNull() ?: 20
+            params["next"] = (page - 1).coerceAtLeast(0).times(size).toString()
+            params["limit"] = size.toString()
+        }
         val missing = method.required.filter { key ->
             params[key].isNullOrBlank() || params[key]!!.startsWith("{")
         }
-        require(missing.isEmpty()) { "Missing parameters: " + missing.joinToString() }
+        require(missing.isEmpty()) { "入力されていない項目があります" }
         val transactionKind = if (method.scope == ApiScope.TRANSACTION) {
             params.remove("kind")?.lowercase()?.also {
                 require(it in setOf("primogem", "crystal", "resin", "artifact", "weapon")) {
@@ -356,7 +383,7 @@ class UpstreamApiClient(
             val authAppId = if (method.scope == ApiScope.TRANSACTION) "csc" else "webview_gacha"
             params["authkey"] = generateAuthKey(cookie, account, authAppId)
         }
-        val requestRegion = if (method.name == "get_genshin_banner_ids") ApiRegion.CHINESE else account.region
+        val requestRegion = account.region
         val base = route(method.scope, account.game, requestRegion)
         if (method.scope == ApiScope.RECORD) {
             if (method.useUidParam) {
@@ -374,7 +401,12 @@ class UpstreamApiClient(
         }
         if (method.name == "get_starrail_lineups") {
             params["lineup_type"] = params.remove("type").orEmpty()
+            require(params["lineup_type"] in setOf("Chasm", "Story", "Boss", "Peak")) {
+                "編成モードが無効です"
+            }
             params["game"] = "hkrpg"
+            params.putIfAbsent("uid", account.uid)
+            params.putIfAbsent("region", account.server)
         }
         if (method.name == "get_tcg_card_effect") {
             val cardId = params["id"]?.toIntOrNull() ?: 0
@@ -397,7 +429,7 @@ class UpstreamApiClient(
                 params["uid"] = account.uid
                 params["region"] = account.server
             } else {
-                params["lang"] = language
+                params.putIfAbsent("lang", language)
             }
         }
         if (method.scope == ApiScope.LEDGER) {
@@ -427,7 +459,8 @@ class UpstreamApiClient(
         if (method.scope == ApiScope.GACHA) {
             params["authkey_ver"] = "1"
             params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty().replace("+", "%2B"), "UTF-8")
-            params["lang"] = if (method.endpoint == "getBeyondGachaLog") language else language.substringBefore('-')
+            val lang = params["lang"] ?: language
+            params["lang"] = if (method.endpoint == "getBeyondGachaLog" || lang.startsWith("zh-")) lang else lang.substringBefore('-')
             params["game_biz"] = gameBiz(account)
             if (method.endpoint in setOf("getGachaLog", "getBeyondGachaLog", "getLdGachaLog")) {
                 params.putIfAbsent("size", "20")
@@ -440,29 +473,32 @@ class UpstreamApiClient(
             params["authkey_ver"] = "1"
             params["sign_type"] = "2"
             params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty().replace("+", "%2B"), "UTF-8")
-            params["lang"] = language.substringBefore('-')
+            val lang = params["lang"] ?: language
+            params["lang"] = if (lang.startsWith("zh-")) lang else lang.substringBefore('-')
             params.putIfAbsent("size", "20")
             params.putIfAbsent("end_id", "0")
         }
-        if (method.scope == ApiScope.WIKI) {
+        if (method.scope == ApiScope.CALCULATOR) {
             params.putIfAbsent("lang", language)
-            params.putIfAbsent("page_num", "1")
-            params.putIfAbsent("page_size", "1000")
+            if (method.name == "get_character_details") params.putIfAbsent("uid", account.uid)
+            if (method.name in setOf("get_character_details", "get_teapot_replica_blueprint")) {
+                params.putIfAbsent("region", account.server)
+            }
         }
+        val lineupSchedule = if (method.name == "get_starrail_lineup_schedules") {
+            when (params.remove("type") ?: "Chasm") {
+                "Chasm" -> "schedule/list"
+                "Story" -> "story_schedule/list"
+                "Boss" -> "boss_schedule/list"
+                else -> throw IllegalArgumentException("開催期間に対応していないモードです")
+            }
+        } else null
         val path = when {
+            lineupSchedule != null -> lineupSchedule
             method.name == "get_hoyolab_user" && account.region == ApiRegion.CHINESE ->
                 "user/wapi/getUserFullInfo"
             method.name == "get_tcg_card_effect" && params.remove("__tcg_action_effect") == "true" ->
-                "role/action_skill"
-            method.name == "get_banner_details" -> {
-                require(account.game == ApiGame.GENSHIN || account.game == ApiGame.STARRAIL)
-                val gameName = if (account.game == ApiGame.STARRAIL) "hkrpg" else "hk4e"
-                val serverName = if (account.game == ApiGame.STARRAIL) "prod_official_asia" else "os_asia"
-                method.endpoint.replace("{game}", gameName)
-                    .replace("{server}", serverName)
-                    .replace("{banner_id}", params["banner_id"].orEmpty())
-                    .replace("{lang}", language)
-            }
+                "action/skill"
             transactionKind != null -> "Get" + transactionKind.replaceFirstChar { it.uppercase() } + "Log"
             method.scope == ApiScope.MIMO &&
                 (account.game == ApiGame.GENSHIN || params["game_id"] == "2") ->
@@ -474,6 +510,7 @@ class UpstreamApiClient(
             else -> method.endpoint
         }
 
+        val requestLanguage = if (method.scope == ApiScope.WIKI) params.remove("lang") ?: language else language
         val post = method.verb == "READ_POST"
         val query = if (post) {
             if (method.scope == ApiScope.CULTIVATE) {
@@ -521,7 +558,10 @@ class UpstreamApiClient(
             )
             else -> emptyMap()
         }
-        val activeCookie = if (method.requiresBadge) {
+        val workingCookie = if (method.name == "get_accompany_character_details") withStuid(cookie) else cookie
+        val activeCookie = if (method.scope in setOf(ApiScope.WEBSTATIC, ApiScope.GACHA, ApiScope.TRANSACTION)) {
+            ""
+        } else if (method.requiresBadge) {
             try {
                 badges.cookieFor(cookie, account, language)
             } catch (error: HoYoApiException) {
@@ -530,35 +570,62 @@ class UpstreamApiClient(
                 badges.invalidate(account)
                 badges.cookieFor(refreshed, account, language)
             }
-        } else cookie
+        } else workingCookie
         val rpcHeaders = method.scope in setOf(
             ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT,
-            ApiScope.CULTIVATE, ApiScope.HSR_WARP, ApiScope.HSR_LINEUP, ApiScope.ZZZ_LEDGER
+            ApiScope.CULTIVATE, ApiScope.HSR_WARP, ApiScope.HSR_LINEUP, ApiScope.ZZZ_LEDGER, ApiScope.WIKI, ApiScope.ACCOUNTS
         )
         val signed = method.scope in setOf(
             ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT,
-            ApiScope.HSR_LINEUP, ApiScope.ZZZ_LEDGER
+            ApiScope.HSR_LINEUP, ApiScope.ZZZ_LEDGER, ApiScope.ACCOUNTS
         ) || ((method.scope == ApiScope.CULTIVATE || method.scope == ApiScope.HSR_WARP) &&
             account.region == ApiRegion.CHINESE)
         return try {
             transport.send(
-                base, path, activeCookie, requestRegion, language,
+                base, path, activeCookie, requestRegion, requestLanguage,
                 if (post) "POST" else "GET", query, body, headers,
                 rpcHeaders = rpcHeaders, signed = signed
             )
         } catch (error: HoYoApiException) {
-            if (!isRefreshable(error)) throw error
+            if (activeCookie.isBlank() || !isRefreshable(error)) throw error
             if (method.requiresBadge) badges.invalidate(account)
             val refreshedBase = sessions.refresh(cookie, account.region) ?: throw error
             val refreshed = if (method.requiresBadge) {
                 badges.cookieFor(refreshedBase, account, language)
             } else refreshedBase
             transport.send(
-                base, path, refreshed, requestRegion, language,
+                base, path, refreshed, requestRegion, requestLanguage,
                 if (post) "POST" else "GET", query, body, headers,
                 rpcHeaders = rpcHeaders, signed = signed
             )
         }
+    }
+
+    internal suspend fun mimoGame(cookie: String, account: ApiAccount, gameId: Int? = null): JSONObject {
+        val id = gameId ?: when (account.game) {
+            ApiGame.GENSHIN -> 2
+            ApiGame.STARRAIL -> 6
+            ApiGame.ZZZ -> 8
+            else -> 5
+        }
+        val data = call(cookie, account, "get_mimo_games")
+        val rows = data.optJSONArray("act_list") ?: data.optJSONArray("list")
+        return rows.objects().map { it.optJSONObject("act_info") ?: it }.firstOrNull { it.optInt("game_id") == id }
+            ?: throw HoYoApiException("このアカウントにMimoの開催情報がありません")
+    }
+
+    suspend fun fetchAuthKey(cookie: String, account: ApiAccount, purpose: String = "webview_gacha"): String {
+        require(purpose in setOf("webview_gacha", "csc")) { "履歴の種類が無効です" }
+        return generateAuthKey(cookie, account, purpose)
+    }
+
+    suspend fun fetchMi18n(base: String, filename: String, locale: String = language): Map<String, String> {
+        require(filename.matches(Regex("[a-zA-Z0-9_.-]+")) && locale.matches(Regex("[a-zA-Z-]+"))) {
+            "ファイル名または言語が無効です"
+        }
+        val result = transport.send(base, "$filename/$filename-$locale.json", "", ApiRegion.OVERSEAS,
+            locale, "GET", emptyMap(), null)
+        return result.keys().asSequence().mapNotNull { key -> (result.opt(key) as? String)?.let { key to it } }.toMap()
     }
 
     private fun gachaTimezoneOffset(account: ApiAccount, page: JSONObject): Int = when (account.game) {
@@ -599,7 +666,7 @@ class UpstreamApiClient(
     private suspend fun announcements(
         cookie: String,
         account: ApiAccount,
-        method: ApiMethod
+        arguments: Map<String, String>
     ): JSONObject {
         require(account.region == ApiRegion.OVERSEAS) {
             "The upstream announcement client currently uses global game announcement hosts."
@@ -613,7 +680,7 @@ class UpstreamApiClient(
         val params = linkedMapOf(
             "game" to game, "game_biz" to gameBiz, "bundle_id" to gameBiz,
             "platform" to "pc", "region" to account.server, "uid" to account.uid,
-            "level" to level.toString(), "lang" to language
+            "level" to (arguments["level"] ?: level.toString()), "lang" to (arguments["lang"] ?: language)
         )
         if (account.game == ApiGame.STARRAIL) params["channel_id"] = "1"
         val base = route(ApiScope.ANNOUNCEMENT, account.game, account.region)
@@ -704,67 +771,6 @@ class UpstreamApiClient(
         }
     }
 
-    private suspend fun allAccompanyPosts(
-        cookie: String,
-        account: ApiAccount,
-        method: ApiMethod,
-        arguments: Map<String, String>
-    ): JSONObject {
-        require(account.region == ApiRegion.OVERSEAS) {
-            "Accompany feeds are only available through the global HoYoLAB API."
-        }
-        val params = method.defaults + arguments
-        require(!params["topic_id"].isNullOrBlank()) { "topic_id is required" }
-        var lastId = params["last_id"].orEmpty()
-        var clientParam = params["client_param"].orEmpty()
-        var sessionParam = params["session_param"].orEmpty()
-        var firstBrush = true
-        val posts = JSONArray()
-        var isLast = false
-        repeat(100) {
-            val bodyParams = params + mapOf(
-                "last_id" to lastId,
-                "client_param" to clientParam,
-                "session_param" to sessionParam,
-                "is_first_brush" to firstBrush.toString()
-            )
-            val response = transport.send(
-                route(ApiScope.BBS, account.game, account.region),
-                method.endpoint,
-                cookie,
-                account.region,
-                language,
-                "POST",
-                emptyMap(),
-                jsonBody(bodyParams),
-                mapOf("Referer" to "https://www.hoyolab.com/"),
-                rpcHeaders = true,
-                signed = true
-            )
-            val page = response.optJSONArray("list") ?: JSONArray()
-            for (i in 0 until page.length()) {
-                val item = page.optJSONObject(i) ?: continue
-                posts.put(item.optJSONObject("post") ?: item)
-            }
-            isLast = response.optBoolean("is_last", page.length() == 0)
-            val nextLastId = response.optString("last_id")
-            val nextClientParam = response.optString("client_param")
-            val nextSessionParam = response.optString("session_param")
-            if (isLast || page.length() == 0 ||
-                (nextLastId == lastId && nextClientParam == clientParam && nextSessionParam == sessionParam)
-            ) return JSONObject()
-                .put("list", posts)
-                .put("is_last", true)
-                .put("last_id", lastId)
-            lastId = nextLastId
-            clientParam = nextClientParam
-            sessionParam = nextSessionParam
-            firstBrush = false
-            kotlinx.coroutines.delay(300)
-        }
-        return JSONObject().put("list", posts).put("is_last", isLast).put("last_id", lastId)
-    }
-
     private suspend fun allTcgDeckComments(
         cookie: String,
         account: ApiAccount,
@@ -805,25 +811,32 @@ class UpstreamApiClient(
     ): JSONObject {
         val paginator = UpstreamPaginator(this)
         val result = JSONArray()
+        val limit = arguments["limit"]?.toIntOrNull()?.takeIf { it > 0 }
+        val query = if (method.name == "get_lineups") arguments else arguments - "limit"
+        val itemField = if (method.name == "teapot_replicas") "articles" else "list"
         val cursorParameter = when (method.name) {
             "claimed_rewards", "genshin_diary_log", "starrail_diary_log", "get_zzz_diary_detail" -> "current_page"
-"get_lineups", "get_starrail_lineups", "get_tcg_decks" -> "next_page_token"
+            "get_lineups", "get_tcg_decks" -> "next_page_token"
             else -> "page"
         }
         paginator.pages(
-            cookie, account, method, arguments,
+            cookie, account, method, query,
             PageSpec(
                 cursorParameter = cursorParameter,
                 cursorField = if (cursorParameter == "next_page_token") "next_page_token" else "next_end_id",
-                itemsField = "list",
+                itemsField = itemField,
                 pageSize = if (cursorParameter == "next_page_token") null else pageSize,
                 maxPages = 100,
                 pauseMilliseconds = 300
             )
-        ).collect { page ->
-            val rows = page.optJSONArray("list") ?: JSONArray()
-            for (i in 0 until rows.length()) result.put(rows.opt(i))
-        }
+        ).takeWhile { page ->
+            val rows = page.optJSONArray(itemField) ?: JSONArray()
+            for (i in 0 until rows.length()) {
+                if (limit != null && result.length() >= limit) break
+                result.put(rows.opt(i))
+            }
+            limit == null || result.length() < limit
+        }.collect {}
         return JSONObject().put("list", result)
     }
 
@@ -833,15 +846,21 @@ class UpstreamApiClient(
         method: ApiMethod,
         arguments: Map<String, String>
     ): JSONObject {
-        val kinds = listOf("primogem", "crystal", "resin", "artifact", "weapon")
+        val kinds = arguments["kind"]?.let(::listOf)
+            ?: listOf("primogem", "crystal", "resin", "artifact", "weapon")
         val requestedLimit = arguments["limit"]?.toIntOrNull()?.takeIf { it > 0 }
-        val baseArgs = arguments - setOf("limit", "kind", "end_id")
+        val baseArgs = (arguments - setOf("limit", "kind", "end_id")).let { args ->
+            if (args["authkey"].isNullOrBlank()) args + ("authkey" to generateAuthKey(cookie, account, "csc"))
+            else args
+        }
         val pageMethod = method.copy(name = "transaction_log_page", required = setOf("kind"))
         val records = mutableListOf<JSONObject>()
         val paginator = UpstreamPaginator(this)
         for (kind in kinds) {
             val kindRecords = mutableListOf<JSONObject>()
-            val pageArgs = baseArgs + mapOf("kind" to kind, "end_id" to "0", "size" to "20")
+            val pageArgs = baseArgs + mapOf(
+                "kind" to kind, "end_id" to (arguments["end_id"] ?: "0"), "size" to "20"
+            )
             paginator.pages(
                 cookie, account, pageMethod, pageArgs,
                 PageSpec(
@@ -854,7 +873,9 @@ class UpstreamApiClient(
                 )
             ).takeWhile { page ->
                 val rows = page.optJSONArray("list") ?: JSONArray()
-                for (i in 0 until rows.length()) rows.optJSONObject(i)?.let(kindRecords::add)
+                for (item in rows.objects()) {
+                    kindRecords.add(item.put("kind", kind))
+                }
                 requestedLimit == null || kindRecords.size < requestedLimit
             }.collect { }
             records.addAll(kindRecords)
@@ -869,17 +890,24 @@ class UpstreamApiClient(
         method: ApiMethod,
         arguments: Map<String, String>
     ): JSONObject {
-        val (types, pageSize) = when (method.name) {
+        val (defaultTypes, pageSize) = when (method.name) {
             "wish_history" -> listOf(100, 200, 301, 302, 400, 500) to 20
             "mw_wish_history" -> listOf(1000, 2000, 20011, 20012, 20021, 20022) to 5
             "warp_history" -> listOf(1, 2, 11, 12, 21, 22) to 20
-            "signal_history" -> listOf(1, 2, 3, 5, 102, 103) to 20
+            "signal_history", "chronicle_signal_history" -> listOf(1, 2, 3, 5, 102, 103) to 20
             else -> emptyList<Int>() to 20
         }
         val requestedLimit = arguments["limit"]?.toIntOrNull()?.takeIf { it > 0 }
+        val types = arguments["gacha_type"]?.let { listOf(it.toInt()) } ?: defaultTypes
         val perBannerLimit = arguments["per_banner_limit"]?.toIntOrNull()?.takeIf { it > 0 }
             ?: requestedLimit
-        val baseArgs = arguments - setOf("limit", "per_banner_limit", "gacha_type", "end_id")
+        val chronicle = method.name == "chronicle_signal_history"
+        val itemField = if (chronicle) "gacha_item_list" else "list"
+        val baseArgs = (arguments - setOf("limit", "per_banner_limit", "gacha_type", "end_id")).let { args ->
+            if (!chronicle && args["authkey"].isNullOrBlank()) {
+                args + ("authkey" to generateAuthKey(cookie, account, "webview_gacha"))
+            } else args
+        }
         val pageMethod = method.copy(name = method.name + "_page", required = setOf("gacha_type"))
         val records = mutableListOf<JSONObject>()
         val paginator = UpstreamPaginator(this)
@@ -887,38 +915,45 @@ class UpstreamApiClient(
             val kindRecords = mutableListOf<JSONObject>()
             val pageArgs = baseArgs + mapOf(
                 "gacha_type" to bannerType.toString(),
-                "end_id" to "0",
-                "size" to pageSize.toString()
-            )
+                "end_id" to (arguments["end_id"] ?: "0")
+            ) + if (chronicle) emptyMap() else mapOf("size" to "20")
             paginator.pages(
                 cookie,
                 account,
-                pageMethod,
+                pageMethod.copy(endpoint = when {
+                    method.name == "warp_history" && bannerType in setOf(21, 22) -> "getLdGachaLog"
+                    method.name == "mw_wish_history" && bannerType !in setOf(1000, 2000) -> "getGachaLog"
+                    else -> pageMethod.endpoint
+                }),
                 pageArgs,
                 PageSpec(
                     cursorParameter = "end_id",
-                    itemsField = "list",
-                    pageSize = pageSize,
+                    itemsField = itemField,
+                    pageSize = if (chronicle) null else pageSize,
                     lastItemCursorField = "id",
                     maxPages = 100,
                     pauseMilliseconds = 350
                 )
             ).takeWhile { page ->
-                val rows = page.optJSONArray("list") ?: JSONArray()
                 val timezoneOffset = gachaTimezoneOffset(account, page)
-                for (i in 0 until rows.length()) {
-                    val item = rows.optJSONObject(i) ?: continue
-                    kindRecords.add(
-                        JSONObject(item.toString())
-                            .put("gacha_type", bannerType)
-                            .put("tz_offset", timezoneOffset)
-                    )
+                for (item in page.optJSONArray(itemField).objects()) {
+                    if (chronicle) {
+                        val date = item.optJSONObject("date") ?: continue
+                        val localTime = runCatching { java.time.LocalDateTime.of(
+                            date.getInt("year"), date.getInt("month"), date.getInt("day"),
+                            date.getInt("hour"), date.getInt("minute"), date.getInt("second")
+                        ) }.getOrNull() ?: continue
+                        val rank = mapOf("S" to 5, "A" to 4, "B" to 3)[item.optString("rarity")] ?: continue
+                        item.put("time", localTime.toString()).put("rank_type", rank).put("uid", account.uid)
+                    }
+                    kindRecords.add(item.put("gacha_type", bannerType).put("tz_offset", timezoneOffset))
                 }
                 perBannerLimit == null || kindRecords.size < perBannerLimit
             }.collect { }
-            records.addAll(kindRecords)
+            records.addAll(perBannerLimit?.let(kindRecords::take) ?: kindRecords)
         }
-        val sorted = mergeHistoryByTime(listOf(records), requestedLimit)
+        val unique = records.distinctBy { it.optString("id").ifBlank { it.toString() } }
+        val sorted = mergeHistoryByTime(listOf(unique), requestedLimit)
         return JSONObject().put("list", JSONArray(sorted))
     }
 
@@ -937,11 +972,18 @@ class UpstreamApiClient(
     private fun jsonBody(params: Map<String, String>): JSONObject = JSONObject().apply {
         for ((key, value) in params) {
             val parsed: Any = when {
-                key in setOf("avatar_list", "entry_page_ids", "character_ids", "types", "role_ids", "role_card_id") ->
+                key in setOf(
+                    "avatar_list", "entry_page_ids", "character_ids", "types", "role_ids", "role_card_id",
+                    "element_attr_ids", "weapon_cat_ids", "weapon_levels", "reliquary_levels",
+                    "reliquary_list", "skill_list", "items", "list", "filters"
+                ) ->
                     try { JSONArray(value) } catch (_: Exception) { value }
-                key in setOf("is_first_brush", "is_cancel", "sync_all_roles") ->
+                key == "weapon" -> JSONObject(value)
+                key in setOf("is_first_brush", "is_cancel", "sync_all_roles", "use_es") ->
                     value.equals("true", ignoreCase = true)
-                key in setOf("game_id", "role_id", "page_size", "page", "size", "task_id", "award_id") ->
+                key in setOf("game_id", "role_id", "page_size", "page", "size", "task_id", "award_id",
+                    "avatar_id", "avatar_level_current", "avatar_level_target", "element_attr_id",
+                    "reliquary_cat_id", "cat_id", "menu_id", "page_num", "label_id") ->
                     value.toLongOrNull() ?: value
                 else -> value
             }
@@ -1019,6 +1061,7 @@ class UpstreamApiClient(
             }
             ApiScope.TRANSACTION -> if (cn) "https://hk4e-api.mihoyo.com/common/hk4e_self_help_query/User"
                 else "https://hk4e-api-os.hoyoverse.com/common/hk4e_self_help_query/User"
+            ApiScope.ACCOUNTS -> if (cn) "https://api-takumi.mihoyo.com" else "https://api-os-takumi.mihoyo.com"
             ApiScope.BBS -> if (cn) "https://bbs-api.mihoyo.com"
                 else "https://bbs-api-os.hoyolab.com"
             ApiScope.MIMO -> "https://sg-public-api.hoyolab.com/event/e2023mimotravel"
@@ -1034,9 +1077,16 @@ class UpstreamApiClient(
     }
 }
 
-class ApiTransport(
-    private val onCookieUpdate: ((String) -> Unit)? = null
+private fun JSONArray?.objects(): List<JSONObject> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull(::optJSONObject)
+
+class ApiTransport internal constructor(
+    private val onCookieUpdate: ((String) -> Unit)?,
+    private val openConnection: (URL) -> HttpURLConnection
 ) {
+    constructor(onCookieUpdate: ((String) -> Unit)? = null) :
+        this(onCookieUpdate, { it.openConnection() as HttpURLConnection })
+
     private val random = SecureRandom()
     private val userAgent = "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36"
 
@@ -1052,15 +1102,38 @@ class ApiTransport(
         headers: Map<String, String> = emptyMap(),
         rpcHeaders: Boolean = false,
         signed: Boolean = false
-    ): JSONObject = withContext(Dispatchers.IO) {
+    ): JSONObject {
+        val exchange = exchange(base, endpoint, cookie, region, language, verb, params, body, headers, rpcHeaders, signed)
+        if (cookie.isNotBlank()) mergeSetCookies(cookie, exchange.headers)
+        exchange.requireSuccess()
+        return when (val result = exchange.payload.opt("data")) {
+            is JSONObject -> result
+            is JSONArray -> JSONObject().put("list", result)
+            else -> exchange.payload
+        }
+    }
+
+    internal suspend fun exchange(
+        base: String,
+        endpoint: String,
+        cookie: String,
+        region: ApiRegion,
+        language: String,
+        verb: String,
+        params: Map<String, String>,
+        body: JSONObject?,
+        headers: Map<String, String> = emptyMap(),
+        rpcHeaders: Boolean = false,
+        signed: Boolean = false
+    ): ApiExchange = withContext(Dispatchers.IO) {
         require(verb == "GET" || verb == "POST")
         val url = ApiUrlComposer.compose(base, endpoint, params)
-        val connection = (url.openConnection() as HttpURLConnection).apply {
+        val connection = openConnection(url).apply {
             requestMethod = verb
             connectTimeout = 15000
             readTimeout = 20000
             instanceFollowRedirects = false
-            setRequestProperty("Cookie", cookie)
+            if (cookie.isNotBlank()) setRequestProperty("Cookie", cookie)
             setRequestProperty("User-Agent", userAgent)
             setRequestProperty("Accept", "application/json")
             if (rpcHeaders) {
@@ -1086,17 +1159,7 @@ class ApiTransport(
             val payload = (if (status in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (status !in 200..299) throw HoYoApiException("HTTP " + status)
-            val response = JSONObject(payload)
-            val code = response.optInt("retcode", response.optInt("code", 0))
-            mergeSetCookies(cookie, connection.headerFields)
-            if (code != 0) {
-                throw HoYoApiException(response.optString("message").ifBlank { "API error " + code } + " (" + code + ")")
-            }
-            when (val result = response.opt("data")) {
-                is JSONObject -> result
-                is JSONArray -> JSONObject().put("list", result)
-                else -> response
-            }
+            ApiExchange(JSONObject(payload), connection.headerFields.orEmpty())
         } finally {
             connection.disconnect()
         }
@@ -1177,4 +1240,24 @@ class ApiTransport(
     }
 
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
+}
+
+internal class ApiExchange(val payload: JSONObject, val headers: Map<String?, List<String>>) {
+    val code: Int get() = payload.optInt("retcode", payload.optInt("code", 0))
+
+    fun header(name: String): String? =
+        headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.firstOrNull()
+
+    fun requireSuccess() {
+        if (code != 0) throw HoYoApiException(payload.optString("message").ifBlank { "通信エラー" } + " (" + code + ")")
+    }
+}
+
+internal fun withStuid(cookie: String): String {
+    val items = cookie.split(';').map(String::trim)
+    if (items.none { it.startsWith("stoken=") || it.startsWith("stoken_v2=") } ||
+        items.any { it.startsWith("stuid=") }) return cookie
+    val id = listOf("ltuid_v2", "account_id_v2", "ltuid", "account_id")
+        .firstNotNullOfOrNull { name -> items.firstOrNull { it.startsWith("$name=") }?.substringAfter('=') }
+    return if (id.isNullOrBlank()) cookie else "$cookie; stuid=$id"
 }

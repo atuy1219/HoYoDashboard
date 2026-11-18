@@ -61,7 +61,7 @@ data class CharacterPreview(
             name = value.string("name", "avatar_name", "nickname"),
             level = value.int("level", "avatar_level"),
             rarity = value.int("rarity", "rank_type", "star"),
-            icon = value.stringOrNull("icon", "avatar_icon", "image"),
+            icon = value.stringOrNull("icon", "avatar_icon", "avatar_url", "avatar_square_icon", "square_icon", "image"),
             element = value.stringOrNull("element", "element_name"),
             weapon = value.stringOrNull("weapon_name", "weapon"),
             raw = value
@@ -256,13 +256,13 @@ object UpstreamModelParser {
             if (type.isNotBlank()) currencyValues[type] = amount
             if (name.isNotBlank()) currencyValues[name] = amount
         }
-        val categoryRows = monthData.optJSONArray("group_by")
+        val categoryRows = monthData.optJSONArray("group_by") ?: monthData.optJSONArray("income_components")
             ?: income.optJSONArray("income_components") ?: JSONArray()
         val categories = (0 until categoryRows.length()).mapNotNull { index ->
             val item = categoryRows.optJSONObject(index) ?: return@mapNotNull null
             DiaryCategory(
                 id = item.stringOrNull("action_id", "action", "data_type"),
-                name = item.string("action", "action_name", "data_name", "name"),
+                name = localizeDiarySource(item.string("action_name", "data_name", "name", "action")),
                 amount = item.longOrNull("num", "count", "amount") ?: 0L,
                 percentage = item.opt("percent")?.toString()?.toIntOrNull()
             )
@@ -310,4 +310,15 @@ object UpstreamModelParser {
             )
         }
     }
+}
+
+fun localizeDiarySource(source: String): String = when (source) {
+    "daily_activity_rewards" -> "デイリー報酬"
+    "growth_rewards" -> "育成報酬"
+    "shiyu_rewards" -> "式輿防衛"
+    "mail_rewards" -> "メール報酬"
+    "hollow_rewards" -> "零号ホロウ"
+    "event_rewards" -> "イベント報酬"
+    "other_rewards" -> "その他"
+    else -> source
 }

@@ -19,11 +19,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -37,17 +32,13 @@ class LoginActivity : ComponentActivity() {
         manager.setAcceptCookie(true)
         setContent {
             MaterialTheme {
-                var chineseLogin by remember { mutableStateOf(false) }
-                val loginUrl = if (chineseLogin) "https://www.miyoushe.com/" else "https://www.hoyolab.com/"
                 Column(Modifier.fillMaxSize().safeDrawingPadding()) {
                     Row(Modifier.fillMaxWidth()) {
                         TextButton(onClick = { finish() }) { Text("戻る") }
                         TextButton(onClick = {
-                            chineseLogin = false
                             browser?.loadUrl("https://www.hoyolab.com/")
                         }) { Text("HoYoLAB") }
                         TextButton(onClick = {
-                            chineseLogin = true
                             browser?.loadUrl("https://www.miyoushe.com/")
                         }) { Text("米游社") }
                         Button(onClick = { finishLogin() }) { Text("連携する") }
@@ -68,10 +59,7 @@ class LoginActivity : ComponentActivity() {
                                 view.loadUrl("https://www.hoyolab.com/")
                             }
                         },
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        update = { view ->
-                            if (view.url != loginUrl) view.loadUrl(loginUrl)
-                        }
+                        modifier = Modifier.weight(1f).fillMaxWidth()
                     )
                 }
             }

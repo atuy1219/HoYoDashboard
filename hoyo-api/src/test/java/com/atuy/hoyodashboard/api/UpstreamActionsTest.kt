@@ -19,7 +19,7 @@ class UpstreamActionsTest {
         assertTrue("finish_mimo_task" in names)
         assertTrue("reply_to_post" in names)
         assertTrue("delete_reply" in names)
-        assertTrue(names.size == 15)
+        assertTrue("set_calculator_sync" in names)
         val definitions = actions.availableActions(account).associateBy { it.name }
         assertTrue(definitions.getValue("delete_reply").confirmationRequired)
         assertTrue(definitions.getValue("buy_mimo_shop_item").confirmationRequired)

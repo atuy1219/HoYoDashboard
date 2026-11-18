@@ -1,5 +1,6 @@
 package com.atuy.hoyodashboard.api
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import org.json.JSONArray
 import org.json.JSONObject

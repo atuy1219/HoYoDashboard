@@ -55,6 +55,7 @@ import com.atuy.hoyodashboard.api.UpstreamFeatureClient
 import com.atuy.hoyodashboard.api.ZzzProfile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 
 private enum class DetailTab(val label: String) {
@@ -87,6 +88,7 @@ internal fun GameDetailScreen(
     var refreshToken by remember(item.role) { mutableIntStateOf(0) }
     var profile by remember(item.role) { mutableStateOf<GameProfile?>(null) }
     var characters by remember(item.role) { mutableStateOf<List<CharacterPreview>?>(null) }
+    var characterDetails by remember(item.role) { mutableStateOf<List<JSONObject>?>(null) }
     var battle by remember(item.role) { mutableStateOf<JSONObject?>(null) }
     var gacha by remember(item.role) { mutableStateOf<List<GachaRecord>?>(null) }
     var diary by remember(item.role) { mutableStateOf<DiarySummary?>(null) }
@@ -110,8 +112,9 @@ internal fun GameDetailScreen(
                         profile = features.profile()
                     }
                 }
-                DetailTab.CHARACTERS -> if (characters == null) {
-                    characters = features.characters()
+                DetailTab.CHARACTERS -> {
+                    if (characters == null) characters = features.characters()
+                    if (characterDetails == null) characterDetails = features.detailedCharacters()
                 }
                 DetailTab.BATTLE -> if (battle == null) {
                     battle = features.fullBattleRecord()
@@ -153,6 +156,7 @@ internal fun GameDetailScreen(
             TextButton(onClick = {
                 profile = null
                 characters = null
+                characterDetails = null
                 battle = null
                 gacha = null
                 diary = null
@@ -194,7 +198,7 @@ internal fun GameDetailScreen(
                 }
                 DetailTab.CHARACTERS -> {
                     val rows = characters
-                    if (rows != null) CharacterList(rows)
+                    if (rows != null) CharacterList(rows, characterDetails.orEmpty())
                 }
                 DetailTab.BATTLE -> battle?.let { JsonPanel("戦闘記録", it) }
                 DetailTab.GACHA -> gacha?.let { GachaList(it) }
@@ -297,8 +301,18 @@ private fun ProfileSummary(profile: GameProfile) {
 }
 
 @Composable
-private fun CharacterList(characters: List<CharacterPreview>) {
+private fun CharacterList(characters: List<CharacterPreview>, details: List<JSONObject>) {
+    var showDetails by remember(characters, details) { mutableStateOf(false) }
     SectionCard("キャラクター " + characters.size + "人") {
+        if (details.isNotEmpty()) {
+            TextButton(onClick = { showDetails = !showDetails }) {
+                Text(if (showDetails) "育成・装備データを閉じる" else "育成・装備データを表示")
+            }
+            if (showDetails) {
+                val data = JSONObject().put("list", JSONArray().apply { details.forEach { put(it) } })
+                JsonPanel("キャラクター詳細", data)
+            }
+        }
         if (characters.isEmpty()) {
             Text("キャラクター情報がありません")
         } else {

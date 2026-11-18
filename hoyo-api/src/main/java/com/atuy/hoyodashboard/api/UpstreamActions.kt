@@ -14,10 +14,9 @@ class UpstreamActions(
         challenge: Map<String, String> = emptyMap()
     ): JSONObject {
         val url = rewardUrl(account)
-        val headers = mapOf(
-            "x-rpc-signgame" to gameShortName(account.game),
-            "Referer" to "https://act.hoyolab.com/"
-        ) + challenge.mapKeys { (key, _) ->
+        val headers = mapOf("x-rpc-signgame" to gameShortName(account.game)) +
+            if (account.region == ApiRegion.OVERSEAS) mapOf("Referer" to "https://act.hoyolab.com/") else emptyMap() +
+            challenge.mapKeys { (key, _) ->
             when (key) {
                 "geetest_challenge" -> "x-rpc-challenge"
                 "geetest_validate" -> "x-rpc-validate"
@@ -27,7 +26,8 @@ class UpstreamActions(
         }
         return transport.send(
             url, "sign", cookie, account.region, language, "POST",
-            mapOf("lang" to language), null, headers
+            mapOf("lang" to language), null, headers,
+            signed = account.region == ApiRegion.CHINESE
         )
     }
 
@@ -95,7 +95,8 @@ class UpstreamActions(
         return transport.send(
             target, "changeDataSwitch", cookie, account.region, language, "POST",
             emptyMap(),
-            JSONObject().put("switch_id", settingId).put("is_public", public).put("game_id", gameId)
+            JSONObject().put("switch_id", settingId).put("is_public", public).put("game_id", gameId),
+            rpcHeaders = true, signed = true
         )
     }
 
@@ -112,7 +113,8 @@ class UpstreamActions(
         return transport.send(
             url, "character/top", cookie, account.region, language, "POST", emptyMap(),
             JSONObject().put("avatar_ids", JSONArray(characterIds))
-                .put("uid_key", account.uid).put("server_key", account.server)
+                .put("uid_key", account.uid).put("server_key", account.server),
+            rpcHeaders = true, signed = true
         )
     }
 
@@ -184,7 +186,8 @@ class UpstreamActions(
         return transport.send(
             "https://bbs-api-os.hoyolab.com", "community/apihub/api/user/accompany/role",
             cookie, account.region, language, "GET",
-            mapOf("role_id" to roleId.toString(), "topic_id" to topicId.toString()), null
+            mapOf("role_id" to roleId.toString(), "topic_id" to topicId.toString()), null,
+            mapOf("Referer" to "https://www.hoyolab.com/"), rpcHeaders = true, signed = true
         )
     }
 
@@ -198,7 +201,8 @@ class UpstreamActions(
             mapOf(
                 "post_id" to postId.toString(), "source_topic_id" to topicId.toString(),
                 "source_type" to "SourceType_Role"
-            ), null
+            ), null, mapOf("Referer" to "https://www.hoyolab.com/"),
+            rpcHeaders = true, signed = true
         )
     }
 
@@ -221,7 +225,11 @@ class UpstreamActions(
         val base = if (account.region == ApiRegion.CHINESE) {
             "https://bbs-api.mihoyo.com"
         } else "https://bbs-api-os.hoyolab.com"
-        return transport.send(base, endpoint, cookie, account.region, language, "POST", emptyMap(), body)
+        return transport.send(
+            base, endpoint, cookie, account.region, language, "POST", emptyMap(), body,
+            mapOf("Referer" to if (account.region == ApiRegion.CHINESE) "https://bbs.mihoyo.com/" else "https://www.hoyolab.com/"),
+            rpcHeaders = true, signed = true
+        )
     }
 
     private fun gameShortName(game: ApiGame): String = when (game) {

@@ -20,7 +20,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.6.0'
-      - run: gradle :app:assembleDebug :hoyo-api:testDebugUnitTest --no-daemon
+      - name: Unit tests
+        run: gradle :hoyo-api:testDebugUnitTest --no-daemon --stacktrace
+      - name: Build APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug

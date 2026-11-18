@@ -20,6 +20,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -33,12 +37,22 @@ class LoginActivity : ComponentActivity() {
         manager.setAcceptCookie(true)
         setContent {
             MaterialTheme {
+                var chineseLogin by remember { mutableStateOf(false) }
+                val loginUrl = if (chineseLogin) "https://www.miyoushe.com/" else "https://www.hoyolab.com/"
                 Column(Modifier.fillMaxSize().safeDrawingPadding()) {
                     Row(Modifier.fillMaxWidth()) {
                         TextButton(onClick = { finish() }) { Text("戻る") }
+                        TextButton(onClick = {
+                            chineseLogin = false
+                            browser?.loadUrl("https://www.hoyolab.com/")
+                        }) { Text("HoYoLAB") }
+                        TextButton(onClick = {
+                            chineseLogin = true
+                            browser?.loadUrl("https://www.miyoushe.com/")
+                        }) { Text("米游社") }
                         Button(onClick = { finishLogin() }) { Text("連携する") }
                     }
-                    Text("HoYoLABにログイン後、連携するを押してください。", Modifier.padding(horizontal = 12.dp))
+                    Text("HoYoLABまたは米游社にログイン後、連携するを押してください。", Modifier.padding(horizontal = 12.dp))
                     AndroidView(
                         factory = { context ->
                             WebView(context).also { view ->
@@ -54,7 +68,10 @@ class LoginActivity : ComponentActivity() {
                                 view.loadUrl("https://www.hoyolab.com/")
                             }
                         },
-                        modifier = Modifier.weight(1f).fillMaxWidth()
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        update = { view ->
+                            if (view.url != loginUrl) view.loadUrl(loginUrl)
+                        }
                     )
                 }
             }
@@ -66,7 +83,7 @@ class LoginActivity : ComponentActivity() {
         manager.flush()
         val allowed = setOf(
             "ltuid", "ltoken", "ltuid_v2", "ltoken_v2", "ltmid", "ltmid_v2",
-            "account_id", "account_id_v2", "account_mid_v2",
+            "account_id", "account_id_v2", "account_mid_v2", "stuid",
             "cookie_token", "cookie_token_v2", "stoken", "stoken_v2",
             "login_ticket", "login_ticket_token", "e_nap_token", "e_hkrpg_token", "e_lrsag"
         )
@@ -74,8 +91,10 @@ class LoginActivity : ComponentActivity() {
         listOf(
             "https://www.hoyolab.com", "https://hoyolab.com",
             "https://account.hoyoverse.com", "https://api-os-takumi.mihoyo.com",
-            "https://api-takumi.mihoyo.com", "https://sg-public-api.hoyolab.com",
-            "https://sg-act-public-api.hoyolab.com", "https://passport-api.mihoyo.com"
+            "https://api-takumi.mihoyo.com", "https://api-takumi-record.mihoyo.com",
+            "https://sg-public-api.hoyolab.com", "https://sg-act-public-api.hoyolab.com",
+            "https://passport-api.mihoyo.com", "https://www.miyoushe.com",
+            "https://bbs.mihoyo.com", "https://account.mihoyo.com"
         ).forEach { site ->
             manager.getCookie(site)?.split(';')?.forEach { part ->
                 val separator = part.indexOf('=')
@@ -87,7 +106,8 @@ class LoginActivity : ComponentActivity() {
             }
         }
         val valid = (cookies.containsKey("ltuid_v2") && cookies.containsKey("ltoken_v2")) ||
-            (cookies.containsKey("ltuid") && cookies.containsKey("ltoken"))
+            (cookies.containsKey("ltuid") && cookies.containsKey("ltoken")) ||
+            (cookies.containsKey("stoken_v2") && cookies.containsKey("ltmid_v2"))
         if (!valid) {
             Toast.makeText(this, "HoYoLABにログインしてください", Toast.LENGTH_LONG).show()
             return

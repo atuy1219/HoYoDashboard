@@ -63,8 +63,9 @@ data class CharacterPreview(
             rarity = value.int("rarity", "rank_type", "star"),
             icon = value.stringOrNull("icon", "avatar_icon", "image"),
             element = value.stringOrNull("element", "element_name"),
-            weapon = value.stringOrNull("weapon_name", "weapon")
-        , raw = value)
+            weapon = value.stringOrNull("weapon_name", "weapon"),
+            raw = value
+        )
     }
 }
 

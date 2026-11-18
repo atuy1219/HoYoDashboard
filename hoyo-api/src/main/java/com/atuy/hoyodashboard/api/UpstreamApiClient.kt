@@ -228,7 +228,12 @@ class UpstreamApiClient(
             ApiScope.CALCULATOR -> mapOf(
                 "Referer" to if (account.region == ApiRegion.OVERSEAS) {
                     "https://act.hoyolab.com/"
-                } else "https://webstatic.mihoyo.com/"
+                } else "https://webstatic.mihoyo.com/ys/event/e20200923adopt_calculator/index.html"
+            )
+            ApiScope.BBS -> mapOf(
+                "Referer" to if (account.region == ApiRegion.CHINESE) {
+                    "https://bbs.mihoyo.com/"
+                } else "https://www.hoyolab.com/"
             )
             else -> emptyMap()
         }
@@ -245,7 +250,7 @@ class UpstreamApiClient(
         val rpcHeaders = method.scope in setOf(
             ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT,
             ApiScope.CULTIVATE, ApiScope.HSR_WARP
-        ) || (method.scope == ApiScope.REWARD && account.region == ApiRegion.CHINESE)
+        )
         val signed = method.scope in setOf(
             ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT
         ) || ((method.scope == ApiScope.REWARD || method.scope == ApiScope.CULTIVATE ||

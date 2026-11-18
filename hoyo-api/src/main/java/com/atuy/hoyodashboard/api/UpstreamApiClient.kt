@@ -858,7 +858,9 @@ class UpstreamApiClient(
             else -> emptyList<Int>() to 20
         }
         val requestedLimit = arguments["limit"]?.toIntOrNull()?.takeIf { it > 0 }
-        val baseArgs = arguments - setOf("limit", "gacha_type", "end_id")
+        val perBannerLimit = arguments["per_banner_limit"]?.toIntOrNull()?.takeIf { it > 0 }
+            ?: requestedLimit
+        val baseArgs = arguments - setOf("limit", "per_banner_limit", "gacha_type", "end_id")
         val pageMethod = method.copy(name = method.name + "_page", required = setOf("gacha_type"))
         val records = mutableListOf<JSONObject>()
         val paginator = UpstreamPaginator(this)
@@ -893,7 +895,7 @@ class UpstreamApiClient(
                             .put("tz_offset", timezoneOffset)
                     )
                 }
-                requestedLimit == null || kindRecords.size < requestedLimit
+                perBannerLimit == null || kindRecords.size < perBannerLimit
             }.collect { }
             records.addAll(kindRecords)
         }

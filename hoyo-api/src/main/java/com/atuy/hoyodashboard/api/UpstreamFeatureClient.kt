@@ -91,14 +91,20 @@ class UpstreamFeatureClient(
         JSONObject().put("_error", error.message ?: "取得できませんでした")
     }
 
-    suspend fun gachaHistory(limit: Int? = null): List<GachaRecord> {
+    suspend fun gachaHistory(
+        limit: Int? = null,
+        perBannerLimit: Int? = null
+    ): List<GachaRecord> {
         val method = when (account.game) {
             ApiGame.GENSHIN -> "wish_history"
             ApiGame.STARRAIL -> "warp_history"
             ApiGame.ZZZ -> "signal_history"
             else -> throw UnsupportedOperationException("Gacha history is not available for " + account.game)
         }
-        val args = limit?.takeIf { it > 0 }?.let { mapOf("limit" to it.toString()) } ?: emptyMap()
+        val args = buildMap {
+            limit?.takeIf { it > 0 }?.let { put("limit", it.toString()) }
+            perBannerLimit?.takeIf { it > 0 }?.let { put("per_banner_limit", it.toString()) }
+        }
         val response = raw(method, args)
         return UpstreamModelParser.gachaHistory(response, 0)
     }

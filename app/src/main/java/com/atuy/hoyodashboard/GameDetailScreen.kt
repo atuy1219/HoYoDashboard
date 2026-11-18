@@ -124,7 +124,7 @@ internal fun GameDetailScreen(
                     battle = features.fullBattleRecord()
                 }
                 DetailTab.GACHA -> if (gacha == null) {
-                    gacha = features.gachaHistory(limit = 100)
+                    gacha = features.gachaHistory(perBannerLimit = 100)
                 }
                 DetailTab.DIARY -> if (diary == null) {
                     diary = features.monthlyDiary()
@@ -351,13 +351,17 @@ private fun CharacterList(characters: List<CharacterPreview>, details: List<JSON
 private fun GachaList(records: List<GachaRecord>) {
     val fiveStars = records.count { it.rarity >= 5 }
     val fourStars = records.count { it.rarity == 4 }
-    SectionCard("ガチャ履歴 " + records.size + "件") {
+    val visibleRecords = records.take(100)
+    SectionCard("ガチャ履歴 " + records.size + "件取得") {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             ValueRow("★5", fiveStars.toString())
             ValueRow("★4", fourStars.toString())
             ValueRow("★5 UP", records.count { it.rarity >= 5 && it.isUp == true }.toString())
         }
         if (records.isEmpty()) Text("履歴がありません")
+        if (records.size > visibleRecords.size) {
+            Text("一覧は最新100件。天井集計は各祈願種別の取得データを使用します。")
+        }
         records.groupBy { it.bannerType }.toSortedMap().forEach { (bannerType, pool) ->
             val newestFirst = pool.sortedByDescending { it.timestamp }
             val pity = newestFirst.takeWhile { it.rarity < 5 }.size
@@ -368,7 +372,7 @@ private fun GachaList(records: List<GachaRecord>) {
             }
         }
         HorizontalDivider(color = Color(0xFF394252))
-        records.forEach { record ->
+        visibleRecords.forEach { record ->
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(record.name, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
@@ -381,7 +385,7 @@ private fun GachaList(records: List<GachaRecord>) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (record != records.last()) HorizontalDivider(color = Color(0xFF394252))
+            if (record != visibleRecords.lastOrNull()) HorizontalDivider(color = Color(0xFF394252))
         }
     }
 }

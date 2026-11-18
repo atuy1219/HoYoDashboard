@@ -66,7 +66,7 @@ internal fun GameDetailScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (note != null) {
-                NoteOverview(note)
+                NoteOverview(note, item.role.game.resource)
             } else {
                 Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2230))) {
                     Text(

@@ -21,9 +21,13 @@ class CookieSessionManager(
             region == ApiRegion.CHINESE &&
                 !current["stoken_v2"].isNullOrBlank() &&
                 !current["ltmid_v2"].isNullOrBlank() -> refreshChineseV2(current)
+            region == ApiRegion.CHINESE &&
+                !current["stoken"].isNullOrBlank() &&
+                (!current["account_id"].isNullOrBlank() || !current["ltuid"].isNullOrBlank() ||
+                    !current["stuid"].isNullOrBlank()) -> refreshChineseLegacy(current)
             region == ApiRegion.OVERSEAS &&
                 !current["stoken"].isNullOrBlank() &&
-                (!current["cookie_token"].isNullOrBlank() || !current["account_id"].isNullOrBlank()) ->
+                (!current["account_id"].isNullOrBlank() || !current["ltuid"].isNullOrBlank()) ->
                 refreshOverseasLegacy(current)
             else -> null
         } ?: return@withContext null
@@ -111,6 +115,19 @@ class CookieSessionManager(
         val token = data.optString("cookie_token")
         if (uid.isBlank() || token.isBlank()) return null
         return mapOf("account_id" to uid, "cookie_token" to token)
+    }
+
+    private fun refreshChineseLegacy(cookies: Map<String, String>): Map<String, String>? {
+        val uid = cookies["account_id"] ?: cookies["ltuid"] ?: cookies["stuid"] ?: return null
+        val endpoint = "https://api-takumi.mihoyo.com/auth/api/getCookieAccountInfoBySToken" +
+            "?uid=" + java.net.URLEncoder.encode(uid, "UTF-8")
+        val response = request("GET", endpoint, cookies, emptyMap(), null)
+        if (response.optInt("retcode") != 0) return null
+        val data = response.optJSONObject("data") ?: return null
+        val result = linkedMapOf<String, String>()
+        data.optString("uid").takeIf { it.isNotBlank() }?.let { result["account_id"] = it }
+        data.optString("cookie_token").takeIf { it.isNotBlank() }?.let { result["cookie_token"] = it }
+        return result.takeIf { it.isNotEmpty() }
     }
 
     private fun refreshOverseasLegacy(cookies: Map<String, String>): Map<String, String>? {

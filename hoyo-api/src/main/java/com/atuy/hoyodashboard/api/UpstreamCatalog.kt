@@ -84,7 +84,7 @@ object UpstreamCatalog {
         r("get_starrail_event_calendar", "イベントカレンダー", "イベント", ApiGame.STARRAIL, ApiScope.RECORD, "get_act_calender"),
 
         r("get_zzz_notes", "リアルタイムノート", "デイリー", ApiGame.ZZZ, ApiScope.RECORD, "note"),
-        r("get_zzz_diary", "月次支出・収入", "月次記録", ApiGame.ZZZ, ApiScope.ZZZ_LEDGER, "month_info"),
+        r("get_zzz_diary", "月次支出・収入", "月次記録", ApiGame.ZZZ, ApiScope.ZZZ_LEDGER, "month_info", defaults = mapOf("month" to "")),
         r("get_zzz_diary_detail", "月次明細", "月次記録", ApiGame.ZZZ, ApiScope.ZZZ_LEDGER, "month_detail", defaults = mapOf("current_page" to "1", "page_size" to "100"), required = setOf("month", "type")),
         r("get_zzz_user", "プレイヤー戦績", "プロフィール", ApiGame.ZZZ, ApiScope.RECORD, "index"),
         r("get_zzz_agents", "エージェント一覧", "キャラクター", ApiGame.ZZZ, ApiScope.RECORD, "avatar/basic"),

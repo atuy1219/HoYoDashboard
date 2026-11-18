@@ -64,6 +64,69 @@ class UpstreamApiClient(
         if (method.scope == ApiScope.ANNOUNCEMENT) {
             return announcements(cookie, account, method)
         }
+        if (method.name == "get_genshin_banner_ids") {
+            val response = transport.send(
+                route(ApiScope.WEBSTATIC, account.game, ApiRegion.CHINESE),
+                method.endpoint,
+                cookie,
+                ApiRegion.CHINESE,
+                language,
+                "GET",
+                emptyMap(),
+                null
+            )
+            val rows = response.optJSONArray("list")
+                ?: response.optJSONObject("data")?.optJSONArray("list")
+                ?: JSONArray()
+            val ids = JSONArray()
+            for (i in 0 until rows.length()) {
+                val item = rows.optJSONObject(i) ?: continue
+                val id = if (item.optInt("gacha_type") == 500) {
+                    "8b10b48c52dd6870f92d72e9963b44bb8968ed2f"
+                } else item.optString("gacha_id")
+                if (id.isNotBlank()) ids.put(id)
+            }
+            return JSONObject().put("list", ids)
+        }
+        if (method.name == "get_banner_details") {
+            require(account.game == ApiGame.GENSHIN || account.game == ApiGame.STARRAIL)
+            val ids = arguments["banner_ids"]?.let { value ->
+                runCatching { JSONArray(value) }.getOrElse {
+                    JSONArray(value.split(',').map(String::trim).filter(String::isNotBlank))
+                }
+            } ?: if (account.game == ApiGame.GENSHIN) {
+                val response = call(cookie, account, "get_genshin_banner_ids")
+                response.optJSONArray("list") ?: JSONArray()
+            } else {
+                throw IllegalArgumentException("Star Rail banner_ids must be supplied.")
+            }
+            val gameName = if (account.game == ApiGame.STARRAIL) "hkrpg" else "hk4e"
+            val serverName = if (account.game == ApiGame.STARRAIL) "prod_official_asia" else "os_asia"
+            val lang = arguments["lang"] ?: language
+            val details = JSONArray()
+            for (i in 0 until ids.length()) {
+                val bannerId = ids.opt(i)?.toString().orEmpty()
+                if (bannerId.isBlank()) continue
+                val path = "gacha_info/$gameName/$serverName/$bannerId/$lang.json"
+                val item = transport.send(
+                    route(ApiScope.WEBSTATIC, account.game, account.region),
+                    path, cookie, account.region, language, "GET", emptyMap(), null
+                )
+                details.put(JSONObject(item.toString()).put("banner_id", bannerId))
+            }
+            return JSONObject().put("list", details)
+        }
+        if (method.name == "get_genshin_banner_names") {
+            val rawMethod = method.copy(name = "get_genshin_banner_names_raw")
+            val response = call(cookie, account, rawMethod, arguments)
+            val rows = response.optJSONArray("gacha_type_list") ?: JSONArray()
+            val names = JSONObject()
+            for (i in 0 until rows.length()) {
+                val item = rows.optJSONObject(i) ?: continue
+                names.put(item.optString("key"), item.optString("name"))
+            }
+            return names
+        }
         if (method.name in setOf("wish_history", "mw_wish_history", "warp_history", "signal_history") &&
             arguments["gacha_type"].isNullOrBlank()
         ) {
@@ -324,10 +387,12 @@ class UpstreamApiClient(
             params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty().replace("+", "%2B"), "UTF-8")
             params["lang"] = if (method.endpoint == "getBeyondGachaLog") language else language.substringBefore('-')
             params["game_biz"] = gameBiz(account)
-            params.putIfAbsent("size", "20")
-            params.putIfAbsent("page", "1")
-            params.putIfAbsent("end_id", "0")
-            params["real_gacha_type"] = params["gacha_type"] ?: error("gacha_type is required")
+            if (method.endpoint in setOf("getGachaLog", "getBeyondGachaLog", "getLdGachaLog")) {
+                params.putIfAbsent("size", "20")
+                params.putIfAbsent("page", "1")
+                params.putIfAbsent("end_id", "0")
+                params["real_gacha_type"] = params["gacha_type"] ?: error("gacha_type is required")
+            }
         }
         if (method.scope == ApiScope.TRANSACTION) {
             params["authkey_ver"] = "1"

@@ -145,7 +145,7 @@ object UpstreamCatalog {
         r("get_tcg_deck_labels", "デッキラベル", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "labels"),
         r("get_tcg_cards", "カード一覧", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "roles"),
         r("get_tcg_card_effect", "カード効果", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "role/skill", required = setOf("id")),
-        r("get_tcg_decks", "公開デッキ", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "index", "READ_POST", defaults = mapOf("page" to "1")),
+        r("get_tcg_decks", "公開デッキ", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "index", "READ_POST", defaults = mapOf("page" to "1", "page_size" to "20")),
         r("get_tcg_deck", "デッキ詳細", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "detail", required = setOf("id")),
         r("get_tcg_deck_comments", "デッキコメント", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "detail", required = setOf("id")),
 
@@ -155,7 +155,7 @@ object UpstreamCatalog {
         r("get_wiki_pages", "複数Wiki記事", "Wiki", null, ApiScope.WIKI, "entry_pages", "READ_POST", required = setOf("entry_page_ids")),
 
         r("get_starrail_lineup_game_modes", "スタレ編成モード", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "tag"),
-        r("get_starrail_lineups", "スタレ編成一覧", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "lineup/index", defaults = mapOf("page" to "1")),
+        r("get_starrail_lineups", "スタレ編成一覧", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "lineup/index", defaults = mapOf("page" to "1", "page_size" to "20")),
         r("get_starrail_lineup_schedules", "忘却の庭・開催期間", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "schedule/challenge"),
         r("get_genshin_announcements", "原神のお知らせ", "お知らせ", ApiGame.GENSHIN, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),
         r("get_starrail_announcements", "スタレのお知らせ", "お知らせ", ApiGame.STARRAIL, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),

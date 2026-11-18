@@ -3,6 +3,8 @@ package com.atuy.hoyodashboard.api
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 class UpstreamActions(
     private val language: String = "ja-jp",
@@ -14,20 +16,33 @@ class UpstreamActions(
         challenge: Map<String, String> = emptyMap()
     ): JSONObject {
         val url = rewardUrl(account)
-        val headers = mapOf("x-rpc-signgame" to gameShortName(account.game)) +
-            if (account.region == ApiRegion.OVERSEAS) mapOf("Referer" to "https://act.hoyolab.com/") else emptyMap() +
-            challenge.mapKeys { (key, _) ->
-            when (key) {
+        val headers = linkedMapOf("x-rpc-signgame" to gameShortName(account.game))
+        if (account.region == ApiRegion.OVERSEAS) {
+            headers["Referer"] = "https://act.hoyolab.com/"
+        } else {
+            headers["DS"] = simpleDynamicSecret("LyD1rXqMv2GJhnwdvCBjFOKGiKuLY3aO")
+            headers["x-rpc-app_version"] = "2.70.1"
+            headers["x-rpc-client_type"] = "5"
+            headers["x-rpc-device_id"] = UUID.randomUUID().toString()
+            headers["x-rpc-sys_version"] = "12"
+            headers["x-rpc-platform"] = "android"
+            headers["x-rpc-channel"] = "miyousheluodi"
+            headers["x-rpc-device_model"] = cookieValue(cookie, "ltuid_v2", "ltuid", "account_id").orEmpty()
+        }
+        challenge.forEach { (key, value) ->
+            headers[when (key) {
                 "geetest_challenge" -> "x-rpc-challenge"
                 "geetest_validate" -> "x-rpc-validate"
                 "geetest_seccode" -> "x-rpc-seccode"
                 else -> throw IllegalArgumentException("Unsupported challenge key.")
-            }
+            }] = value
         }
+        val params = if (account.region == ApiRegion.CHINESE) {
+            mapOf("uid" to account.uid, "region" to account.server)
+        } else mapOf("lang" to language)
         return transport.send(
             url, "sign", cookie, account.region, language, "POST",
-            mapOf("lang" to language), null, headers,
-            signed = account.region == ApiRegion.CHINESE
+            params, null, headers
         )
     }
 
@@ -241,15 +256,41 @@ class UpstreamActions(
     }
 
     private fun rewardUrl(account: ApiAccount): String {
-        if (account.region != ApiRegion.OVERSEAS) {
-            throw UnsupportedOperationException("Chinese daily claim requires additional DS headers.")
+        return if (account.region == ApiRegion.CHINESE) {
+            when (account.game) {
+                ApiGame.GENSHIN -> "https://api-takumi.mihoyo.com/event/luna/hk4e?act_id=e202311201442471"
+                ApiGame.HONKAI -> "https://api-takumi.mihoyo.com/event/luna/bh3?act_id=e202306201626331"
+                ApiGame.STARRAIL -> "https://api-takumi.mihoyo.com/event/luna/hkrpg?act_id=e202304121516551"
+                ApiGame.ZZZ -> "https://api-takumi.mihoyo.com/event/luna/zzz?act_id=e202406242138391"
+                ApiGame.TOT -> "https://api-takumi.mihoyo.com/event/luna/nxx?act_id=e202202251749321"
+            }
+        } else {
+            when (account.game) {
+                ApiGame.GENSHIN -> "https://sg-hk4e-api.hoyolab.com/event/sol?act_id=e202102251931481"
+                ApiGame.HONKAI -> "https://sg-public-api.hoyolab.com/event/mani?act_id=e202110291205111"
+                ApiGame.STARRAIL -> "https://sg-public-api.hoyolab.com/event/luna/hkrpg/os?act_id=e202303301540311"
+                ApiGame.ZZZ -> "https://sg-public-api.hoyolab.com/event/luna/zzz/os?act_id=e202406031448091"
+                ApiGame.TOT -> "https://sg-public-api.hoyolab.com/event/luna/nxx/os?act_id=e202202281857121"
+            }
         }
-        return when (account.game) {
-            ApiGame.GENSHIN -> "https://sg-hk4e-api.hoyolab.com/event/sol?act_id=e202102251931481"
-            ApiGame.HONKAI -> "https://sg-public-api.hoyolab.com/event/mani?act_id=e202110291205111"
-            ApiGame.STARRAIL -> "https://sg-public-api.hoyolab.com/event/luna/hkrpg/os?act_id=e202303301540311"
-            ApiGame.ZZZ -> "https://sg-public-api.hoyolab.com/event/luna/zzz/os?act_id=e202406031448091"
-            ApiGame.TOT -> "https://sg-public-api.hoyolab.com/event/luna/nxx/os?act_id=e202202281857121"
-        }
+    }
+
+    private fun simpleDynamicSecret(salt: String): String {
+        val timestamp = System.currentTimeMillis() / 1000
+        val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        val random = SecureRandom()
+        val nonce = buildString { repeat(6) { append(alphabet[random.nextInt(alphabet.length)]) } }
+        val seed = "salt=$salt&t=$timestamp&r=$nonce"
+        val hash = MessageDigest.getInstance("MD5").digest(seed.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        return "$timestamp,$nonce,$hash"
+    }
+
+    private fun cookieValue(cookie: String, vararg names: String): String? {
+        val values = cookie.split(';').mapNotNull { part ->
+            val index = part.indexOf('=')
+            if (index <= 0) null else part.substring(0, index).trim() to part.substring(index + 1).trim()
+        }.toMap()
+        return names.firstNotNullOfOrNull { values[it] }
     }
 }

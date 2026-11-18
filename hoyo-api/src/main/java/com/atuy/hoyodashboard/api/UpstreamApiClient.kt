@@ -272,7 +272,7 @@ class UpstreamApiClient(
         if (method.scope == ApiScope.GACHA) {
             params["authkey_ver"] = "1"
             params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty().replace("+", "%2B"), "UTF-8")
-            params["lang"] = if (method.name == "mw_wish_history") language else language.substringBefore('-')
+            params["lang"] = if (method.endpoint == "getBeyondGachaLog") language else language.substringBefore('-')
             params["game_biz"] = gameBiz(account)
             params.putIfAbsent("size", "20")
             params.putIfAbsent("page", "1")

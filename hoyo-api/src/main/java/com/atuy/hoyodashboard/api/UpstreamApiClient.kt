@@ -72,6 +72,20 @@ class UpstreamApiClient(
         if (method.name == "transaction_log" && arguments["kind"].isNullOrBlank()) {
             return allTransactionHistory(cookie, account, method, arguments)
         }
+        val pageSizes = mapOf(
+            "claimed_rewards" to 10,
+            "genshin_diary_log" to 100,
+            "starrail_diary_log" to 100,
+            "get_zzz_diary_detail" to 100,
+            "get_lineups" to 20,
+            "get_starrail_lineups" to 20,
+            "get_tcg_decks" to 20,
+            "teapot_replicas" to 20,
+            "get_mimo_point_history" to 20
+        )
+        pageSizes[method.name]?.let { pageSize ->
+            return collectPages(cookie, account, method, arguments, pageSize)
+        }
         if (method.name == "get_full_genshin_user") {
             val user = call(cookie, account, "get_genshin_user")
             val current = call(cookie, account, "get_genshin_spiral_abyss")
@@ -377,10 +391,10 @@ class UpstreamApiClient(
         } else cookie
         val rpcHeaders = method.scope in setOf(
             ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT,
-            ApiScope.CULTIVATE, ApiScope.HSR_WARP
+            ApiScope.CULTIVATE, ApiScope.HSR_WARP, ApiScope.HSR_LINEUP
         )
         val signed = method.scope in setOf(
-            ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT
+            ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT, ApiScope.HSR_LINEUP
         ) || ((method.scope == ApiScope.CULTIVATE || method.scope == ApiScope.HSR_WARP) &&
             account.region == ApiRegion.CHINESE)
         return try {
@@ -529,6 +543,31 @@ class UpstreamApiClient(
                 key
             }
         }
+    }
+
+    private suspend fun collectPages(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod,
+        arguments: Map<String, String>,
+        pageSize: Int
+    ): JSONObject {
+        val paginator = UpstreamPaginator(this)
+        val result = JSONArray()
+        paginator.pages(
+            cookie, account, method, arguments,
+            PageSpec(
+                cursorParameter = "current_page",
+                itemsField = "list",
+                pageSize = pageSize,
+                maxPages = 100,
+                pauseMilliseconds = 300
+            )
+        ).collect { page ->
+            val rows = page.optJSONArray("list") ?: JSONArray()
+            for (i in 0 until rows.length()) result.put(rows.opt(i))
+        }
+        return JSONObject().put("list", result)
     }
 
     private suspend fun allTransactionHistory(

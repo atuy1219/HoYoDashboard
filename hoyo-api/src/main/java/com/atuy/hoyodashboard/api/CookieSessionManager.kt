@@ -57,7 +57,7 @@ class CookieSessionManager(
         requestCookies["mid"] = cookies["ltmid_v2"].orEmpty()
         val body = JSONObject().put("dst_token_types", JSONArray().put(2).put(4))
         val headers = mapOf(
-            "DS" to dynamicSecret(APP_LOGIN_SALT, body.toString()),
+            "DS" to dynamicSecret(APP_LOGIN_SALT, body.toString(), includeBody = true),
             "x-rpc-app_id" to "c9oqaq3s3gu8"
         )
         val response = request(
@@ -84,7 +84,7 @@ class CookieSessionManager(
         val requestCookies = cookies.toMutableMap()
         requestCookies["mid"] = cookies["ltmid_v2"].orEmpty()
         val headers = mapOf(
-            "DS" to dynamicSecret(APP_LOGIN_SALT, ""),
+            "DS" to dynamicSecret(APP_LOGIN_SALT),
             "x-rpc-app_id" to "bll8iq97cem8"
         )
         val response = request(
@@ -166,19 +166,27 @@ class CookieSessionManager(
         }
     }
 
-    private fun dynamicSecret(salt: String, body: String): String {
+    private fun dynamicSecret(
+        salt: String,
+        body: String? = null,
+        includeBody: Boolean = false
+    ): String {
         val timestamp = System.currentTimeMillis() / 1000
         val random = SecureRandom()
-        val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        val alphabet = if (includeBody) {
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        } else "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
         val nonce = buildString { repeat(6) { append(alphabet[random.nextInt(alphabet.length)]) } }
-        val seed = "salt=$salt&t=$timestamp&r=$nonce&b=$body&q="
+        val seed = if (includeBody) {
+            "salt=$salt&t=$timestamp&r=$nonce&b=${body.orEmpty()}&q="
+        } else "salt=$salt&t=$timestamp&r=$nonce"
         val hash = MessageDigest.getInstance("MD5").digest(seed.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 255) }
         return "$timestamp,$nonce,$hash"
     }
 
     companion object {
-        private const val APP_LOGIN_SALT = "s4r5h2j8n9d3k6p1"
+        private const val APP_LOGIN_SALT = "IZPgfb0dRPtBeLuFkdDznSZ6f4wWt6y2"
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36"
     }

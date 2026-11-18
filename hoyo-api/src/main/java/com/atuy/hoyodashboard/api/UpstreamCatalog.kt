@@ -154,10 +154,10 @@ object UpstreamCatalog {
         r("get_starrail_warp_pool_stats", "跳躍統計", "ガチャ", ApiGame.STARRAIL, ApiScope.HSR_WARP, "pool_stat", required = setOf("gacha_type"), requiresBadge = true),
         r("get_starrail_five_star_warps", "星5跳躍履歴", "ガチャ", ApiGame.STARRAIL, ApiScope.HSR_WARP, "five_star_list", required = setOf("gacha_type"), requiresBadge = true),
 
-        r("wish_history", "祈願履歴", "ガチャ", ApiGame.GENSHIN, ApiScope.GACHA, "getGachaLog", authKeyRequired = true),
-        r("warp_history", "跳躍履歴", "ガチャ", ApiGame.STARRAIL, ApiScope.GACHA, "getGachaLog", authKeyRequired = true),
-        r("signal_history", "変調履歴", "ガチャ", ApiGame.ZZZ, ApiScope.GACHA, "getGachaLog", authKeyRequired = true),
-        r("transaction_log", "通貨取引明細", "取引履歴", ApiGame.GENSHIN, ApiScope.TRANSACTION, "GetActionLog", authKeyRequired = true),
+        r("wish_history", "祈願履歴", "ガチャ", ApiGame.GENSHIN, ApiScope.GACHA, "getGachaLog", required = setOf("gacha_type"), authKeyRequired = true),
+        r("warp_history", "跳躍履歴", "ガチャ", ApiGame.STARRAIL, ApiScope.GACHA, "getGachaLog", required = setOf("gacha_type"), authKeyRequired = true),
+        r("signal_history", "変調履歴", "ガチャ", ApiGame.ZZZ, ApiScope.GACHA, "getGachaLog", required = setOf("gacha_type"), authKeyRequired = true),
+        r("transaction_log", "通貨取引明細", "取引履歴", ApiGame.GENSHIN, ApiScope.TRANSACTION, "GetActionLog", required = setOf("kind"), authKeyRequired = true),
 
         r("search_users", "HoYoLABユーザー検索", "HoYoLAB", null, ApiScope.BBS, "community/search/wapi/search/user", required = setOf("keyword"), defaults = mapOf("page_size" to "20")),
         r("get_hoyolab_user", "HoYoLABユーザー", "HoYoLAB", null, ApiScope.BBS, "community/user/wapi/getUserFullInfo", required = setOf("uid")),

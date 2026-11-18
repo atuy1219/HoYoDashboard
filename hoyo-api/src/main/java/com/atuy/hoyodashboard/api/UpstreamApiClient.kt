@@ -232,16 +232,23 @@ class UpstreamApiClient(
             )
             else -> emptyMap()
         }
-        val activeCookie = if (method.requiresBadge) badges.cookieFor(cookie, account, language) else cookie
+        val activeCookie = if (method.requiresBadge) {
+            try {
+                badges.cookieFor(cookie, account, language)
+            } catch (error: HoYoApiException) {
+                if (!isRefreshable(error)) throw error
+                val refreshed = sessions.refresh(cookie, account.region) ?: throw error
+                badges.invalidate(account)
+                badges.cookieFor(refreshed, account, language)
+            }
+        } else cookie
         return try {
             transport.send(
                 base, path, activeCookie, account.region, language,
                 if (post) "POST" else "GET", query, body, headers
             )
         } catch (error: HoYoApiException) {
-            val message = error.message.orEmpty()
-            val refreshable = listOf("(-100)", "(-101)", "(10001)", "(10101)").any(message::contains)
-            if (!refreshable) throw error
+            if (!isRefreshable(error)) throw error
             if (method.requiresBadge) badges.invalidate(account)
             val refreshedBase = sessions.refresh(cookie, account.region) ?: throw error
             val refreshed = if (method.requiresBadge) {
@@ -252,6 +259,11 @@ class UpstreamApiClient(
                 if (post) "POST" else "GET", query, body, headers
             )
         }
+    }
+
+    private fun isRefreshable(error: HoYoApiException): Boolean {
+        val message = error.message.orEmpty()
+        return listOf("(-100)", "(-101)", "(10001)", "(10101)").any(message::contains)
     }
 
     private suspend fun generateAuthKey(cookie: String, account: ApiAccount, authAppId: String): String {

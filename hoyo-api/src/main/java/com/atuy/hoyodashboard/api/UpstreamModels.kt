@@ -105,7 +105,16 @@ data class GachaRecord(
                 bannerType = value.int("gacha_type", "op_gacha_type", "real_gacha_type").takeIf { it > 0 } ?: bannerType,
                 bannerId = value.stringOrNull("gacha_id", "schedule_id", "banner_id"),
                 itemId = value.stringOrNull("item_id"),
-                isUp = value.opt("is_up")?.toString()?.toBooleanStrictOrNull(),
+                isUp = when (val up = value.opt("is_up")) {
+                    is Boolean -> up
+                    is Number -> up.toInt() != 0
+                    is String -> when (up.lowercase()) {
+                        "true", "1" -> true
+                        "false", "0" -> false
+                        else -> null
+                    }
+                    else -> null
+                },
                 raw = value
             )
         }

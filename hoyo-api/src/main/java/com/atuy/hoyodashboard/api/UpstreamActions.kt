@@ -10,6 +10,95 @@ class UpstreamActions(
     private val language: String = "ja-jp",
     private val transport: ApiTransport = ApiTransport()
 ) {
+
+    fun availableActions(account: ApiAccount): List<UpstreamActionDefinition> {
+        val actions = listOf(
+            UpstreamActionDefinition("claim_daily_reward", "デイリーチェックイン", emptyList()),
+            UpstreamActionDefinition("redeem_code", "交換コード", listOf("code")),
+            UpstreamActionDefinition("update_settings", "プロフィール公開設定", listOf("setting_id", "public"), true),
+            UpstreamActionDefinition("set_top_genshin_characters", "原神の注目キャラクター", listOf("character_ids")),
+            UpstreamActionDefinition("finish_mimo_task", "Mimoタスク完了", listOf("task_id", "game_id", "version_id")),
+            UpstreamActionDefinition("claim_mimo_task_reward", "Mimo報酬受け取り", listOf("task_id", "game_id", "version_id")),
+            UpstreamActionDefinition("buy_mimo_shop_item", "Mimoショップ交換", listOf("item_id", "game_id", "version_id"), true),
+            UpstreamActionDefinition("draw_mimo_lottery", "Mimo抽選", listOf("game_id", "version_id"), true),
+            UpstreamActionDefinition("reply_to_post", "HoYoLABに返信", listOf("post_id", "content"), true),
+            UpstreamActionDefinition("delete_reply", "HoYoLAB返信削除", listOf("reply_id", "post_id"), true),
+            UpstreamActionDefinition("join_topic", "HoYoLABトピック参加", listOf("topic_id")),
+            UpstreamActionDefinition("leave_topic", "HoYoLABトピック退出", listOf("topic_id"), true),
+            UpstreamActionDefinition("accompany_character", "コンパニオン設定", listOf("role_id", "topic_id")),
+            UpstreamActionDefinition("browse_accompany_post", "コンパニオン投稿閲覧", listOf("post_id", "topic_id")),
+            UpstreamActionDefinition(
+                "set_accompany_voice_setting", "コンパニオン音声設定",
+                listOf("game_id", "role_id", "voice_language", "script_language")
+            )
+        )
+        return actions.filter { action ->
+            when (action.name) {
+                "redeem_code" -> account.region == ApiRegion.OVERSEAS && account.game != ApiGame.HONKAI
+                "update_settings" -> account.game != ApiGame.TOT
+                "set_top_genshin_characters" -> account.game == ApiGame.GENSHIN
+                "finish_mimo_task", "claim_mimo_task_reward", "buy_mimo_shop_item", "draw_mimo_lottery",
+                "accompany_character", "browse_accompany_post" ->
+                    account.region == ApiRegion.OVERSEAS
+                else -> true
+            }
+        }
+    }
+
+    suspend fun execute(
+        cookie: String,
+        account: ApiAccount,
+        name: String,
+        arguments: Map<String, String>
+    ): JSONObject {
+        fun required(key: String): String = arguments[key]?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException(key + " is required")
+        fun long(key: String): Long = required(key).toLongOrNull()
+            ?: throw IllegalArgumentException(key + " must be an integer")
+        fun int(key: String): Int = required(key).toIntOrNull()
+            ?: throw IllegalArgumentException(key + " must be an integer")
+        fun bool(key: String, default: Boolean = false): Boolean =
+            arguments[key]?.let {
+                when (it.lowercase()) {
+                    "true", "1", "yes" -> true
+                    "false", "0", "no" -> false
+                    else -> throw IllegalArgumentException(key + " must be true or false")
+                }
+            } ?: default
+
+        require(availableActions(account).any { it.name == name }) {
+            "Action is not available for this account: " + name
+        }
+        return when (name) {
+            "claim_daily_reward" -> claimDailyReward(
+                cookie, account,
+                arguments.filterKeys { it in setOf("geetest_challenge", "geetest_validate", "geetest_seccode") }
+            )
+            "redeem_code" -> redeemCode(cookie, account, required("code"))
+            "update_settings" -> updateSettings(cookie, account, int("setting_id"), bool("public"))
+            "set_top_genshin_characters" -> setTopGenshinCharacters(
+                cookie, account,
+                required("character_ids").split(',').map { it.trim().toIntOrNull()
+                    ?: throw IllegalArgumentException("character_ids must be comma-separated integers") }
+            )
+            "finish_mimo_task" -> finishMimoTask(cookie, account, long("task_id"), int("game_id"), int("version_id"))
+            "claim_mimo_task_reward" -> claimMimoTaskReward(cookie, account, long("task_id"), int("game_id"), int("version_id"))
+            "buy_mimo_shop_item" -> buyMimoShopItem(cookie, account, long("item_id"), int("game_id"), int("version_id"))
+            "draw_mimo_lottery" -> drawMimoLottery(cookie, account, int("game_id"), int("version_id"))
+            "reply_to_post" -> replyToPost(cookie, account, long("post_id"), required("content"))
+            "delete_reply" -> deleteReply(cookie, account, long("reply_id"), long("post_id"))
+            "join_topic" -> joinTopic(cookie, account, long("topic_id"))
+            "leave_topic" -> leaveTopic(cookie, account, long("topic_id"))
+            "accompany_character" -> accompanyCharacter(cookie, account, long("role_id"), long("topic_id"))
+            "browse_accompany_post" -> browseAccompanyPost(cookie, account, long("post_id"), long("topic_id"))
+            "set_accompany_voice_setting" -> setAccompanyVoiceSetting(
+                cookie, account, int("game_id"), long("role_id"),
+                required("voice_language"), required("script_language"), bool("sync_all_roles")
+            )
+            else -> throw IllegalArgumentException("Unknown action: " + name)
+        }
+    }
+
     suspend fun claimDailyReward(
         cookie: String,
         account: ApiAccount,

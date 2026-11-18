@@ -73,25 +73,32 @@ class UpstreamFeatureClient(
         }
     }
 
-    suspend fun monthlyDiary(month: Int? = null): DiarySummary {
+    suspend fun monthlyDiary(month: String? = null): DiarySummary {
         val method = when (account.game) {
             ApiGame.GENSHIN -> "get_genshin_diary"
             ApiGame.STARRAIL -> "get_starrail_diary"
             ApiGame.ZZZ -> "get_zzz_diary"
             else -> throw UnsupportedOperationException("Monthly ledger is not available for " + account.game)
         }
-        val args = month?.let { mapOf("month" to it.toString()) } ?: emptyMap()
+        val args = when (account.game) {
+            ApiGame.GENSHIN -> month?.toIntOrNull()?.let { mapOf("month" to it.toString()) } ?: emptyMap()
+            ApiGame.STARRAIL, ApiGame.ZZZ -> month?.let { mapOf("month" to it) } ?: emptyMap()
+            else -> emptyMap()
+        }
         return UpstreamModelParser.diary(raw(method, args))
     }
 
-    suspend fun monthlyDiaryEntries(month: Int, type: Int = 1): List<JSONObject> {
+    suspend fun monthlyDiaryEntries(month: String, type: Int = 1): List<JSONObject> {
         val method = when (account.game) {
             ApiGame.GENSHIN -> "genshin_diary_log"
             ApiGame.STARRAIL -> "starrail_diary_log"
             ApiGame.ZZZ -> "get_zzz_diary_detail"
             else -> throw UnsupportedOperationException("Monthly transaction details are not available for " + account.game)
         }
-        val response = raw(method, mapOf("month" to month.toString(), "type" to type.toString()))
+        val monthValue = if (account.game == ApiGame.GENSHIN) {
+            month.toIntOrNull()?.toString() ?: throw IllegalArgumentException("Genshin month must be 1-12.")
+        } else month
+        val response = raw(method, mapOf("month" to monthValue, "type" to type.toString()))
         return response.jsonList()
     }
 

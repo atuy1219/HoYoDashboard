@@ -1,0 +1,346 @@
+package com.atuy.hoyodashboard.api
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URL
+import java.net.URLEncoder
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Calendar
+
+enum class ApiRegion { OVERSEAS, CHINESE }
+
+data class ApiAccount(
+    val game: ApiGame,
+    val uid: String,
+    val server: String,
+    val region: ApiRegion = ApiRegion.OVERSEAS
+) {
+    companion object {
+        fun from(role: Role) = ApiAccount(ApiGame.from(role.game), role.uid, role.server)
+    }
+}
+
+class UpstreamApiClient(
+    private val language: String = "ja-jp",
+    private val transport: ApiTransport = ApiTransport()
+) {
+    fun available(game: ApiGame): List<ApiMethod> =
+        UpstreamCatalog.methods.filter { it.game == null || it.game == game }
+
+    suspend fun call(
+        cookie: String,
+        account: ApiAccount,
+        name: String,
+        arguments: Map<String, String> = emptyMap()
+    ): JSONObject {
+        val method = UpstreamCatalog.find(name)
+            ?: throw IllegalArgumentException("Unknown upstream method: " + name)
+        return call(cookie, account, method, arguments)
+    }
+
+    suspend fun call(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod,
+        arguments: Map<String, String> = emptyMap()
+    ): JSONObject {
+        require(method.readOnly) { "Write operations require a separate explicit API." }
+        require(method.game == null || method.game == account.game) {
+            "Endpoint not supported for " + account.game
+        }
+        val params = method.defaults.mapValues { (_, value) ->
+            value.replace("{uid}", account.uid).replace("{server}", account.server)
+        }.toMutableMap()
+        params.putAll(arguments)
+        val missing = method.required.filter { key ->
+            params[key].isNullOrBlank() || params[key]!!.startsWith("{")
+        }
+        require(missing.isEmpty()) { "Missing parameters: " + missing.joinToString() }
+        if (method.authKeyRequired && params["authkey"].isNullOrBlank()) {
+            throw IllegalArgumentException("A separate gacha authkey is required.")
+        }
+        if (method.requiresBadge) {
+            throw UnsupportedOperationException("Badge authentication is not implemented.")
+        }
+
+        val base = route(method.scope, account.game, account.region)
+        if (method.scope == ApiScope.RECORD) {
+            if (method.useUidParam) {
+                params["uid"] = account.uid
+                params["region"] = account.server
+            } else {
+                params["role_id"] = account.uid
+                params["server"] = account.server
+            }
+        }
+        if (method.scope == ApiScope.ZZZ_LEDGER || method.scope == ApiScope.CULTIVATE) {
+            params["uid"] = account.uid
+            params["region"] = account.server
+        }
+        if (method.scope == ApiScope.REWARD) {
+            params["uid"] = account.uid
+            params["region"] = account.server
+            params["lang"] = language
+        }
+        if (method.scope == ApiScope.LEDGER) {
+            if (account.region == ApiRegion.CHINESE) {
+                params["bind_uid"] = account.uid
+                params["bind_region"] = account.server
+            } else {
+                params["uid"] = account.uid
+                params["region"] = account.server
+            }
+            params.putIfAbsent("month", (Calendar.getInstance().get(Calendar.MONTH) + 1).toString())
+            params["lang"] = language
+        }
+        if (method.scope in setOf(ApiScope.LINEUP, ApiScope.CARD_PLAZA, ApiScope.TEAPOT, ApiScope.MIMO)) {
+            params.putIfAbsent("lang", language)
+        }
+        if (method.scope == ApiScope.HSR_WARP) {
+            params["role_id"] = account.uid
+            params["server"] = account.server
+            params["game_biz"] = if (account.region == ApiRegion.CHINESE) "hkrpg_cn" else "hkrpg_global"
+        }
+        if (method.scope == ApiScope.GACHA) {
+            params.putIfAbsent("lang", language)
+            params.putIfAbsent("size", "20")
+            params.putIfAbsent("page", "1")
+            params.putIfAbsent("end_id", "0")
+        }
+        if (method.scope == ApiScope.WIKI) {
+            params.putIfAbsent("lang", language)
+            params.putIfAbsent("page_num", "1")
+            params.putIfAbsent("page_size", "1000")
+        }
+        val path = if (method.scope == ApiScope.MIMO &&
+            (account.game == ApiGame.GENSHIN || params["game_id"] == "2")) {
+            "qiuqiu/" + method.endpoint.replace("-", "_")
+        } else method.endpoint
+
+        val post = method.verb == "READ_POST"
+        val query = if (post) {
+            if (method.scope == ApiScope.CULTIVATE) {
+                mapOf("uid" to account.uid, "region" to account.server)
+            } else emptyMap()
+        } else params
+        val body = if (post) jsonBody(params) else null
+        val headers = when (method.scope) {
+            ApiScope.REWARD -> mapOf(
+                "x-rpc-signgame" to when (account.game) {
+                    ApiGame.GENSHIN -> "hk4e"
+                    ApiGame.STARRAIL -> "hkrpg"
+                    ApiGame.ZZZ -> "zzz"
+                    ApiGame.HONKAI -> "bh3"
+                    ApiGame.TOT -> "nxx"
+                },
+                "Referer" to "https://act.hoyolab.com/"
+            )
+            ApiScope.CALCULATOR -> mapOf(
+                "Referer" to if (account.region == ApiRegion.OVERSEAS) {
+                    "https://act.hoyolab.com/"
+                } else "https://webstatic.mihoyo.com/"
+            )
+            else -> emptyMap()
+        }
+        return transport.send(
+            base, path, cookie, account.region, language,
+            if (post) "POST" else "GET", query, body, headers
+        )
+    }
+
+    private fun jsonBody(params: Map<String, String>): JSONObject = JSONObject().apply {
+        for ((key, value) in params) {
+            val parsed = if (key in setOf("avatar_list", "entry_page_ids", "character_ids")) {
+                runCatching { JSONArray(value) }.getOrElse { value }
+            } else value
+            put(key, parsed)
+        }
+    }
+
+    private fun route(scope: ApiScope, game: ApiGame, region: ApiRegion): String {
+        val cn = region == ApiRegion.CHINESE
+        return when (scope) {
+            ApiScope.RECORD -> {
+                val prefix = "https://api-takumi-record.mihoyo.com"
+                when (game) {
+                    ApiGame.GENSHIN -> if (cn) prefix + "/game_record/app/genshin/api"
+                        else "https://sg-public-api.hoyolab.com/event/game_record/genshin/api"
+                    ApiGame.STARRAIL -> if (cn) prefix + "/game_record/app/hkrpg/api"
+                        else "https://bbs-api-os.hoyolab.com/game_record/hkrpg/api"
+                    ApiGame.ZZZ -> if (cn) prefix + "/event/game_record_zzz/api/zzz"
+                        else "https://sg-act-public-api.hoyolab.com/event/game_record_zzz/api/zzz"
+                    ApiGame.HONKAI -> if (cn) prefix + "/game_record/app/honkai3rd/api"
+                        else "https://bbs-api-os.hoyolab.com/game_record/honkai3rd/api"
+                    ApiGame.TOT -> throw UnsupportedOperationException("No Battle Chronicle route for Tears of Themis.")
+                }
+            }
+            ApiScope.CARD -> if (cn) "https://api-takumi-record.mihoyo.com/game_record/app/card/wapi"
+                else "https://bbs-api-os.hoyolab.com/game_record/card/wapi"
+            ApiScope.LEDGER -> when (game) {
+                ApiGame.GENSHIN -> if (cn) "https://hk4e-api.mihoyo.com/event/ys_ledger"
+                    else "https://sg-hk4e-api.hoyolab.com/event/ysledgeros"
+                ApiGame.STARRAIL -> if (cn) "https://api-takumi.mihoyo.com/event/srledger"
+                    else "https://sg-public-api.hoyolab.com/event/srledger"
+                else -> throw UnsupportedOperationException("Ledger unsupported for " + game)
+            }
+            ApiScope.ZZZ_LEDGER -> "https://sg-public-api.hoyolab.com/event/nap_ledger"
+            ApiScope.CULTIVATE -> if (cn) "https://api-takumi.mihoyo.com/event/nap_cultivate_tool"
+                else "https://sg-act-public-api.hoyolab.com/event/nap_cultivate_tool"
+            ApiScope.REWARD -> if (cn) {
+                when (game) {
+                    ApiGame.GENSHIN -> "https://api-takumi.mihoyo.com/event/luna/hk4e?act_id=e202311201442471"
+                    ApiGame.HONKAI -> "https://api-takumi.mihoyo.com/event/luna/bh3?act_id=e202306201626331"
+                    ApiGame.STARRAIL -> "https://api-takumi.mihoyo.com/event/luna/hkrpg?act_id=e202304121516551"
+                    ApiGame.ZZZ -> "https://api-takumi.mihoyo.com/event/luna/zzz?act_id=e202406242138391"
+                    ApiGame.TOT -> "https://api-takumi.mihoyo.com/event/luna/nxx?act_id=e202202251749321"
+                }
+            } else {
+                when (game) {
+                    ApiGame.GENSHIN -> "https://sg-hk4e-api.hoyolab.com/event/sol?act_id=e202102251931481"
+                    ApiGame.HONKAI -> "https://sg-public-api.hoyolab.com/event/mani?act_id=e202110291205111"
+                    ApiGame.STARRAIL -> "https://sg-public-api.hoyolab.com/event/luna/hkrpg/os?act_id=e202303301540311"
+                    ApiGame.ZZZ -> "https://sg-public-api.hoyolab.com/event/luna/zzz/os?act_id=e202406031448091"
+                    ApiGame.TOT -> "https://sg-public-api.hoyolab.com/event/luna/nxx/os?act_id=e202202281857121"
+                }
+            }
+            ApiScope.CALCULATOR -> if (cn) "https://api-takumi.mihoyo.com/event/e20200928calculate"
+                else "https://sg-public-api.hoyolab.com/event/e20200928calculate"
+            ApiScope.LINEUP -> if (cn) "https://api-takumi.mihoyo.com/event/platsimulator"
+                else "https://sg-public-api.hoyoverse.com/event/simulatoros"
+            ApiScope.HSR_LINEUP -> "https://sg-public-api.hoyolab.com/event/rpgsimulator"
+            ApiScope.HSR_WARP -> if (cn) "https://api-takumi.mihoyo.com/event/rpg_gacha_record"
+                else "https://sg-act-public-api.hoyolab.com/event/rpg_gacha_record"
+            ApiScope.CARD_PLAZA -> "https://sg-act-public-api.hoyolab.com/event/cardsquare"
+            ApiScope.TEAPOT -> if (cn) throw UnsupportedOperationException("Teapot has no Chinese route.")
+                else "https://sg-hk4e-api.hoyolab.com/event/e20221121ugcos"
+            ApiScope.WIKI -> "https://sg-wiki-api.hoyolab.com/hoyowiki/wapi"
+            ApiScope.GACHA -> when (game) {
+                ApiGame.GENSHIN -> if (cn) "https://public-operation-hk4e.mihoyo.com/gacha_info/api"
+                    else "https://public-operation-hk4e-sg.hoyoverse.com/gacha_info/api"
+                ApiGame.STARRAIL -> if (cn) "https://public-operation-hkrpg.mihoyo.com/common/gacha_record/api"
+                    else "https://public-operation-hkrpg-sg.hoyoverse.com/common/gacha_record/api"
+                ApiGame.ZZZ -> if (cn) "https://public-operation-nap.mihoyo.com/common/gacha_record/api"
+                    else "https://public-operation-nap-sg.hoyoverse.com/common/gacha_record/api"
+                else -> throw UnsupportedOperationException("Gacha unsupported for " + game)
+            }
+            ApiScope.TRANSACTION -> if (cn) "https://hk4e-api.mihoyo.com/common/hk4e_self_help_query/User"
+                else "https://hk4e-api-os.hoyoverse.com/common/hk4e_self_help_query/User"
+            ApiScope.BBS -> if (cn) "https://bbs-api.mihoyo.com"
+                else "https://bbs-api-os.hoyolab.com"
+            ApiScope.MIMO -> "https://sg-public-api.hoyolab.com/event/e2023mimotravel"
+            ApiScope.WEBSTATIC -> if (cn) "https://operation-webstatic.mihoyo.com"
+                else "https://operation-webstatic.hoyoverse.com"
+            ApiScope.ANNOUNCEMENT -> when (game) {
+                ApiGame.GENSHIN -> "https://sg-hk4e-api.hoyoverse.com/common/hk4e_global"
+                ApiGame.STARRAIL -> "https://sg-hkrpg-api.hoyoverse.com/common/hkrpg_global"
+                ApiGame.ZZZ -> "https://sg-announcement-static.hoyoverse.com/common/nap_global"
+                else -> throw UnsupportedOperationException("No announcements for " + game)
+            }
+        }
+    }
+}
+
+class ApiTransport {
+    private val random = SecureRandom()
+    private val userAgent = "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36"
+
+    suspend fun send(
+        base: String,
+        endpoint: String,
+        cookie: String,
+        region: ApiRegion,
+        language: String,
+        verb: String,
+        params: Map<String, String>,
+        body: JSONObject?,
+        headers: Map<String, String> = emptyMap()
+    ): JSONObject = withContext(Dispatchers.IO) {
+        require(verb == "GET" || verb == "POST")
+        require(!endpoint.startsWith("http") && !endpoint.contains(".."))
+        val uri = URI(base)
+        val host = uri.host ?: throw IllegalArgumentException("Missing API host")
+        require(uri.scheme == "https" && listOf(
+            "hoyolab.com", "hoyoverse.com", "mihoyo.com", "miyoushe.com"
+        ).any { host == it || host.endsWith("." + it) }) { "Unsafe API host" }
+        val path = uri.rawPath.orEmpty().trimEnd('/') + "/" + endpoint.trimStart('/')
+        val query = buildList {
+            if (!uri.rawQuery.isNullOrEmpty()) add(uri.rawQuery)
+            for ((key, value) in params) add(encode(key) + "=" + encode(value))
+        }.joinToString("&")
+        val url = URL(uri.scheme + "://" + host + path + if (query.isEmpty()) "" else "?" + query)
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = verb
+            connectTimeout = 15000
+            readTimeout = 20000
+            instanceFollowRedirects = false
+            setRequestProperty("Cookie", cookie)
+            setRequestProperty("User-Agent", userAgent)
+            setRequestProperty("Referer", if (region == ApiRegion.CHINESE) "https://bbs.mihoyo.com/" else "https://www.hoyolab.com/")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("x-rpc-language", language)
+            setRequestProperty("x-rpc-lang", language)
+            setRequestProperty("x-rpc-app_version", if (region == ApiRegion.CHINESE) "2.11.1" else "1.5.0")
+            setRequestProperty("x-rpc-client_type", "5")
+            setRequestProperty("DS", dynamicSecret(region, body, params))
+            headers.forEach { (name, value) -> setRequestProperty(name, value) }
+            if (body != null) {
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            }
+        }
+        try {
+            if (body != null) {
+                connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            }
+            val status = connection.responseCode
+            val payload = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw HoYoApiException("HTTP " + status)
+            val response = JSONObject(payload)
+            val code = response.optInt("retcode", response.optInt("code", 0))
+            if (code != 0) {
+                throw HoYoApiException(response.optString("message").ifBlank { "API error " + code } + " (" + code + ")")
+            }
+            when (val result = response.opt("data")) {
+                is JSONObject -> result
+                is JSONArray -> JSONObject().put("list", result)
+                else -> response
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun dynamicSecret(
+        region: ApiRegion,
+        body: JSONObject?,
+        params: Map<String, String>
+    ): String {
+        val timestamp = System.currentTimeMillis() / 1000
+        val salt: String
+        val nonce: String
+        val seed: String
+        if (region == ApiRegion.OVERSEAS) {
+            salt = "6s25p5ox5y14umn1p61aqyyvbvvl3lrt"
+            val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            nonce = buildString { repeat(6) { append(alphabet[random.nextInt(alphabet.length)]) } }
+            seed = "salt=" + salt + "&t=" + timestamp + "&r=" + nonce
+        } else {
+            salt = "xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"
+            nonce = (100001 + random.nextInt(100000)).toString()
+            val query = params.toSortedMap().entries.joinToString("&") { it.key + "=" + it.value }
+            seed = "salt=" + salt + "&t=" + timestamp + "&r=" + nonce + "&b=" +
+                (body?.toString() ?: "") + "&q=" + query
+        }
+        val hash = MessageDigest.getInstance("MD5").digest(seed.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        return timestamp.toString() + "," + nonce + "," + hash
+    }
+
+    private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
+}

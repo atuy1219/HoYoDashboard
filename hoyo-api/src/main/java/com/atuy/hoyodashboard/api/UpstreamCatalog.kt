@@ -172,7 +172,7 @@ object UpstreamCatalog {
 
         r("warp_history", "跳躍履歴", "ガチャ", ApiGame.STARRAIL, ApiScope.GACHA, "getGachaLog", authKeyRequired = true),
         r("signal_history", "変調履歴", "ガチャ", ApiGame.ZZZ, ApiScope.GACHA, "getGachaLog", authKeyRequired = true),
-        r("transaction_log", "通貨取引明細", "取引履歴", ApiGame.GENSHIN, ApiScope.TRANSACTION, "GetActionLog", required = setOf("kind"), authKeyRequired = true),
+        r("transaction_log", "通貨取引明細", "取引履歴", ApiGame.GENSHIN, ApiScope.TRANSACTION, "GetActionLog", authKeyRequired = true),
 
         r("search_users", "HoYoLABユーザー検索", "HoYoLAB", null, ApiScope.BBS, "community/search/wapi/search/user", required = setOf("keyword"), defaults = mapOf("page_size" to "20")),
         r("get_hoyolab_user", "HoYoLABユーザー", "HoYoLAB", null, ApiScope.BBS, "community/painter/wapi/user/full"),

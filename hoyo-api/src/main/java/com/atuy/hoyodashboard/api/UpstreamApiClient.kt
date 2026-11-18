@@ -12,8 +12,6 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Calendar
 
-enum class ApiRegion { OVERSEAS, CHINESE }
-
 data class ApiAccount(
     val game: ApiGame,
     val uid: String,
@@ -21,13 +19,14 @@ data class ApiAccount(
     val region: ApiRegion = ApiRegion.OVERSEAS
 ) {
     companion object {
-        fun from(role: Role) = ApiAccount(ApiGame.from(role.game), role.uid, role.server)
+        fun from(role: Role) = ApiAccount(ApiGame.from(role.game), role.uid, role.server, role.region)
     }
 }
 
 class UpstreamApiClient(
     private val language: String = "ja-jp",
-    private val transport: ApiTransport = ApiTransport(),
+    private val onCookieUpdate: ((String) -> Unit)? = null,
+    private val transport: ApiTransport = ApiTransport(onCookieUpdate),
     private val badges: BadgeSession = BadgeSession()
 ) {
     fun available(game: ApiGame): List<ApiMethod> =
@@ -117,7 +116,8 @@ class UpstreamApiClient(
         }
         require(missing.isEmpty()) { "Missing parameters: " + missing.joinToString() }
         if (method.authKeyRequired && params["authkey"].isNullOrBlank()) {
-            throw IllegalArgumentException("A separate gacha authkey is required.")
+            val authAppId = if (method.scope == ApiScope.TRANSACTION) "csc" else "webview_gacha"
+            params["authkey"] = generateAuthKey(cookie, account, authAppId)
         }
         val base = route(method.scope, account.game, account.region)
         if (method.scope == ApiScope.RECORD) {
@@ -134,19 +134,26 @@ class UpstreamApiClient(
             params["region"] = account.server
         }
         if (method.scope == ApiScope.REWARD) {
-            params["uid"] = account.uid
-            params["region"] = account.server
             params["lang"] = language
+            if (account.region == ApiRegion.CHINESE) {
+                params["uid"] = account.uid
+                params["region"] = account.server
+            }
         }
         if (method.scope == ApiScope.LEDGER) {
-            if (account.region == ApiRegion.CHINESE) {
+            if (account.region == ApiRegion.CHINESE && account.game == ApiGame.GENSHIN) {
                 params["bind_uid"] = account.uid
                 params["bind_region"] = account.server
             } else {
                 params["uid"] = account.uid
                 params["region"] = account.server
             }
-            params.putIfAbsent("month", (Calendar.getInstance().get(Calendar.MONTH) + 1).toString())
+            params.putIfAbsent(
+                "month",
+                if (account.game == ApiGame.STARRAIL) {
+                    java.text.SimpleDateFormat("yyyyMM", java.util.Locale.ROOT).format(java.util.Date())
+                } else (Calendar.getInstance().get(Calendar.MONTH) + 1).toString()
+            )
             params["lang"] = language
         }
         if (method.scope in setOf(ApiScope.LINEUP, ApiScope.CARD_PLAZA, ApiScope.TEAPOT, ApiScope.MIMO)) {
@@ -158,9 +165,22 @@ class UpstreamApiClient(
             params["game_biz"] = if (account.region == ApiRegion.CHINESE) "hkrpg_cn" else "hkrpg_global"
         }
         if (method.scope == ApiScope.GACHA) {
-            params.putIfAbsent("lang", language)
+            params["authkey_ver"] = "1"
+            params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty(), "UTF-8")
+            params["lang"] = language.substringBefore('-')
+            params["game_biz"] = gameBiz(account)
             params.putIfAbsent("size", "20")
             params.putIfAbsent("page", "1")
+            params.putIfAbsent("end_id", "0")
+            params.putIfAbsent("gacha_type", "1")
+            params.putIfAbsent("real_gacha_type", params["gacha_type"] ?: "1")
+        }
+        if (method.scope == ApiScope.TRANSACTION) {
+            params["authkey_ver"] = "1"
+            params["sign_type"] = "2"
+            params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty(), "UTF-8")
+            params["lang"] = language.substringBefore('-')
+            params.putIfAbsent("size", "20")
             params.putIfAbsent("end_id", "0")
         }
         if (method.scope == ApiScope.WIKI) {
@@ -168,10 +188,16 @@ class UpstreamApiClient(
             params.putIfAbsent("page_num", "1")
             params.putIfAbsent("page_size", "1000")
         }
-        val path = if (method.scope == ApiScope.MIMO &&
-            (account.game == ApiGame.GENSHIN || params["game_id"] == "2")) {
-            "qiuqiu/" + method.endpoint.replace("-", "_")
-        } else method.endpoint
+        val path = when {
+            method.scope == ApiScope.MIMO &&
+                (account.game == ApiGame.GENSHIN || params["game_id"] == "2") ->
+                "qiuqiu/" + method.endpoint.replace("-", "_")
+            method.scope == ApiScope.LEDGER && account.region == ApiRegion.CHINESE &&
+                account.game == ApiGame.GENSHIN && method.endpoint == "month_info" -> "monthInfo"
+            method.scope == ApiScope.LEDGER && account.region == ApiRegion.CHINESE &&
+                account.game == ApiGame.GENSHIN && method.endpoint == "month_detail" -> "monthDetail"
+            else -> method.endpoint
+        }
 
         val post = method.verb == "READ_POST"
         val query = if (post) {
@@ -215,6 +241,42 @@ class UpstreamApiClient(
         }
     }
 
+    private suspend fun generateAuthKey(cookie: String, account: ApiAccount, authAppId: String): String {
+        require(account.region == ApiRegion.OVERSEAS) {
+            "genshin.py only supports authkey generation for overseas accounts."
+        }
+        val body = JSONObject()
+            .put("game_uid", account.uid)
+            .put("region", account.server)
+            .put("game_biz", gameBiz(account))
+            .put("auth_appid", authAppId)
+        val result = transport.send(
+            "https://api-account-os.hoyoverse.com/binding/api",
+            "genAuthKeyByCookieToken",
+            cookie,
+            account.region,
+            language,
+            "POST",
+            emptyMap(),
+            body
+        )
+        val key = result.optString("authkey")
+        if (key.isBlank()) throw HoYoApiException("Authkey was not returned by HoYoverse.")
+        return key
+    }
+
+    private fun gameBiz(account: ApiAccount): String {
+        val suffix = if (account.region == ApiRegion.CHINESE) "cn" else "global"
+        val prefix = when (account.game) {
+            ApiGame.GENSHIN -> "hk4e"
+            ApiGame.STARRAIL -> "hkrpg"
+            ApiGame.ZZZ -> "nap"
+            ApiGame.HONKAI -> "bh3"
+            ApiGame.TOT -> "nxx"
+        }
+        return "${prefix}_${suffix}"
+    }
+
     private fun jsonBody(params: Map<String, String>): JSONObject = JSONObject().apply {
         for ((key, value) in params) {
             val parsed = if (key in setOf("avatar_list", "entry_page_ids", "character_ids")) {
@@ -250,7 +312,8 @@ class UpstreamApiClient(
                     else "https://sg-public-api.hoyolab.com/event/srledger"
                 else -> throw UnsupportedOperationException("Ledger unsupported for " + game)
             }
-            ApiScope.ZZZ_LEDGER -> "https://sg-public-api.hoyolab.com/event/nap_ledger"
+            ApiScope.ZZZ_LEDGER -> if (cn) throw UnsupportedOperationException("ZZZ ledger route is not available for the Chinese region.")
+                else "https://sg-public-api.hoyolab.com/event/nap_ledger"
             ApiScope.CULTIVATE -> if (cn) "https://api-takumi.mihoyo.com/event/nap_cultivate_tool"
                 else "https://sg-act-public-api.hoyolab.com/event/nap_cultivate_tool"
             ApiScope.REWARD -> if (cn) {
@@ -307,7 +370,9 @@ class UpstreamApiClient(
     }
 }
 
-class ApiTransport {
+class ApiTransport(
+    private val onCookieUpdate: ((String) -> Unit)? = null
+) {
     private val random = SecureRandom()
     private val userAgent = "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36"
 
@@ -357,6 +422,7 @@ class ApiTransport {
             if (code != 0) {
                 throw HoYoApiException(response.optString("message").ifBlank { "API error " + code } + " (" + code + ")")
             }
+            mergeSetCookies(cookie, connection.headerFields)
             when (val result = response.opt("data")) {
                 is JSONObject -> result
                 is JSONArray -> JSONObject().put("list", result)
@@ -365,6 +431,39 @@ class ApiTransport {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun mergeSetCookies(cookie: String, headers: Map<String?, List<String>>?) {
+        val accepted = setOf(
+            "ltuid", "ltoken", "ltuid_v2", "ltoken_v2", "ltmid_v2",
+            "account_id", "account_id_v2", "account_mid_v2",
+            "cookie_token", "cookie_token_v2", "stoken", "stoken_v2",
+            "login_ticket", "login_ticket_token", "e_nap_token", "e_hkrpg_token",
+            "e_lrsag", "SERVERID", "SERVERCORSID", "mi18nLang"
+        )
+        val merged = linkedMapOf<String, String>()
+        cookie.split(';').forEach { part ->
+            val index = part.indexOf('=')
+            if (index > 0) {
+                val name = part.substring(0, index).trim()
+                val value = part.substring(index + 1).trim()
+                if (name in accepted && value.isNotEmpty()) merged[name] = value
+            }
+        }
+        headers.orEmpty().filterKeys { it.equals("set-cookie", ignoreCase = true) }
+            .values.flatten().forEach { header ->
+                val part = header.substringBefore(';').trim()
+                val index = part.indexOf('=')
+                if (index > 0) {
+                    val name = part.substring(0, index).trim()
+                    val value = part.substring(index + 1).trim()
+                    if (name in accepted) {
+                        if (value.isEmpty()) merged.remove(name) else merged[name] = value
+                    }
+                }
+            }
+        val updated = merged.entries.joinToString("; ") { it.key + "=" + it.value }
+        if (updated.isNotBlank() && updated != cookie) onCookieUpdate?.invoke(updated)
     }
 
     private fun dynamicSecret(

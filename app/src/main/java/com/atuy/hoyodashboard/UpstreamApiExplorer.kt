@@ -83,7 +83,7 @@ internal fun UpstreamApiExplorer(role: Role) {
     LaunchedEffect(role.uid, role.game) {
         val automatic = methods.filter {
             it.readOnly && it.required.isEmpty() && !it.authKeyRequired &&
-                !it.requiresBadge && it.name !in setOf("get_genshin_notes", "get_starrail_notes", "get_zzz_notes")
+                it.name !in setOf("get_genshin_notes", "get_starrail_notes", "get_zzz_notes")
         }
         automatic.forEach { method ->
             launch {
@@ -137,9 +137,6 @@ internal fun UpstreamApiExplorer(role: Role) {
                                                 parameterMethod = method
                                                 parameterText = ""
                                             }
-                                            method.requiresBadge -> {
-                                                selectedResult = method.name
-                                            }
                                             else -> coroutineScope.launch { fetch(method) }
                                         }
                                     }
@@ -148,7 +145,7 @@ internal fun UpstreamApiExplorer(role: Role) {
                                 Row {
                                     Text(method.title, modifier = Modifier.weight(1f))
                                     val label = when (status) {
-                                        null -> if (method.requiresBadge) "認証未対応" else if (method.required.isNotEmpty() || method.authKeyRequired) "入力が必要" else "未取得"
+                                        null -> if (method.required.isNotEmpty() || method.authKeyRequired) "入力が必要" else "未取得"
                                         LoadState.Fetching -> "取得中"
                                         is LoadState.Ready -> "取得済"
                                         is LoadState.Failed -> "取得失敗"

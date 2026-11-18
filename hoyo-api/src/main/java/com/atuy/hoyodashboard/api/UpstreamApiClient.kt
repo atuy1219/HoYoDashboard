@@ -196,6 +196,9 @@ class UpstreamApiClient(
         if (method.name == "get_tcg_deck_comments") {
             return allTcgDeckComments(cookie, account, method, arguments)
         }
+        if (method.name == "get_accompany_character_posts") {
+            return allAccompanyPosts(cookie, account, method, arguments)
+        }
         if (method.name == "get_all_zzz_agent_upgrade_guides") {
             val agents = call(cookie, account, "get_zzz_upgrade_guide_agents")
             val rows = agents.optJSONArray("list") ?: JSONArray()
@@ -659,6 +662,67 @@ class UpstreamApiClient(
                 key
             }
         }
+    }
+
+    private suspend fun allAccompanyPosts(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod,
+        arguments: Map<String, String>
+    ): JSONObject {
+        require(account.region == ApiRegion.OVERSEAS) {
+            "Accompany feeds are only available through the global HoYoLAB API."
+        }
+        val params = method.defaults + arguments
+        require(!params["topic_id"].isNullOrBlank()) { "topic_id is required" }
+        var lastId = params["last_id"].orEmpty()
+        var clientParam = params["client_param"].orEmpty()
+        var sessionParam = params["session_param"].orEmpty()
+        var firstBrush = true
+        val posts = JSONArray()
+        var isLast = false
+        repeat(100) {
+            val bodyParams = params + mapOf(
+                "last_id" to lastId,
+                "client_param" to clientParam,
+                "session_param" to sessionParam,
+                "is_first_brush" to firstBrush.toString()
+            )
+            val response = transport.send(
+                route(ApiScope.BBS, account.game, account.region),
+                method.endpoint,
+                cookie,
+                account.region,
+                language,
+                "POST",
+                emptyMap(),
+                jsonBody(bodyParams),
+                mapOf("Referer" to "https://www.hoyolab.com/"),
+                rpcHeaders = true,
+                signed = true
+            )
+            val page = response.optJSONArray("list") ?: JSONArray()
+            for (i in 0 until page.length()) {
+                val item = page.optJSONObject(i) ?: continue
+                posts.put(item.optJSONObject("post") ?: item)
+            }
+            isLast = response.optBoolean("is_last", page.length() == 0)
+            val nextLastId = response.optString("last_id")
+            val nextClientParam = response.optString("client_param")
+            val nextSessionParam = response.optString("session_param")
+            if (isLast || page.length() == 0 ||
+                (nextLastId == lastId && nextClientParam == clientParam && nextSessionParam == sessionParam)
+            ) return JSONObject()
+                .put("list", posts)
+                .put("is_last", true)
+                .put("last_id", lastId)
+            lastId = nextLastId
+            clientParam = nextClientParam
+            sessionParam = nextSessionParam
+            firstBrush = false
+            kotlinx.coroutines.delay(300)
+        }
+        return JSONObject().put("list", posts).put("is_last", isLast).put("last_id", lastId)
     }
 
     private suspend fun allTcgDeckComments(

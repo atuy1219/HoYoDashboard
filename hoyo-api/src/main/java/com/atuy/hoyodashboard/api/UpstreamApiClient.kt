@@ -54,6 +54,51 @@ class UpstreamApiClient(
         require(method.game == null || method.game == account.game) {
             "Endpoint not supported for " + account.game
         }
+        if (method.scope == ApiScope.ANNOUNCEMENT) {
+            return announcements(cookie, account, method)
+        }
+        if (method.name == "get_full_genshin_user") {
+            val user = call(cookie, account, "get_genshin_user")
+            val current = call(cookie, account, "get_genshin_spiral_abyss")
+            val previous = call(cookie, account, "get_genshin_spiral_abyss_previous")
+            val activities = call(cookie, account, "get_genshin_activities")
+            return JSONObject().put("user", user).put("spiral_abyss", current)
+                .put("previous_spiral_abyss", previous).put("activities", activities)
+        }
+        if (method.name == "get_honkai_abyss") {
+            val old = call(cookie, account, "get_honkai_old_abyss")
+            val current = call(cookie, account, "get_honkai_superstring_abyss")
+            return JSONObject().put("old_abyss", old).put("superstring_abyss", current)
+        }
+        if (method.name == "get_full_honkai_user") {
+            val user = call(cookie, account, "get_honkai_user")
+            val suits = call(cookie, account, "get_honkai_battlesuits")
+            val abyss = call(cookie, account, "get_honkai_abyss")
+            val arena = call(cookie, account, "get_honkai_memorial_arena")
+            val realm = call(cookie, account, "get_honkai_elysian_realm")
+            return JSONObject().put("user", user).put("battlesuits", suits).put("abyss", abyss)
+                .put("memorial_arena", arena).put("elysian_realm", realm)
+        }
+        if (method.name == "get_all_zzz_agent_upgrade_guides") {
+            val agents = call(cookie, account, "get_zzz_upgrade_guide_agents")
+            val rows = agents.optJSONArray("list") ?: JSONArray()
+            val results = JSONArray()
+            val ids = (0 until rows.length()).mapNotNull {
+                rows.optJSONObject(it)?.optInt("id", 0)?.takeIf { id -> id > 0 }
+            }
+            for (batch in ids.chunked(10)) {
+                val avatarList = JSONArray()
+                batch.forEach { id ->
+                    avatarList.put(JSONObject().put("avatar_id", id).put("is_teaser", false)
+                        .put("teaser_need_weapon", false).put("teaser_sp_skill", false))
+                }
+                val guides = call(cookie, account, "get_zzz_agent_upgrade_guide",
+                    mapOf("avatar_list" to avatarList.toString()))
+                val list = guides.optJSONArray("list") ?: JSONArray()
+                for (i in 0 until list.length()) results.put(list.opt(i))
+            }
+            return JSONObject().put("list", results)
+        }
         if (method.name == "get_genshin_user" || method.name == "get_starrail_user") {
             val index = call(cookie, account, method.copy(name = method.name + "_index"), arguments)
             val other = if (method.name == "get_genshin_user") {
@@ -141,6 +186,18 @@ class UpstreamApiClient(
             params["uid"] = account.uid
             params["region"] = account.server
         }
+        if (method.name == "get_web_events") {
+            val gameId = when (account.game) {
+                ApiGame.HONKAI -> 1
+                ApiGame.GENSHIN -> 2
+                ApiGame.TOT -> 4
+                ApiGame.STARRAIL -> 6
+                ApiGame.ZZZ -> 8
+            }
+            params.putIfAbsent("gids", gameId.toString())
+            params.putIfAbsent("size", "15")
+            params.putIfAbsent("offset", "")
+        }
         if (method.scope == ApiScope.REWARD) {
             params["lang"] = language
             if (account.region == ApiRegion.CHINESE) {
@@ -196,6 +253,8 @@ class UpstreamApiClient(
             params.putIfAbsent("page_size", "1000")
         }
         val path = when {
+            method.name == "get_hoyolab_user" && account.region == ApiRegion.CHINESE ->
+                "user/wapi/getUserFullInfo"
             transactionKind != null -> "Get" + transactionKind.replaceFirstChar { it.uppercase() } + "Log"
             method.scope == ApiScope.MIMO &&
                 (account.game == ApiGame.GENSHIN || params["game_id"] == "2") ->
@@ -276,6 +335,74 @@ class UpstreamApiClient(
         }
     }
 
+    private suspend fun announcements(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod
+    ): JSONObject {
+        require(account.region == ApiRegion.OVERSEAS) {
+            "The upstream announcement client currently uses global game announcement hosts."
+        }
+        val (game, gameBiz, level) = when (account.game) {
+            ApiGame.GENSHIN -> Triple("hk4e", "hk4e_global", 8)
+            ApiGame.STARRAIL -> Triple("hkrpg", "hkrpg_global", 70)
+            ApiGame.ZZZ -> Triple("nap", "nap_global", 60)
+            else -> throw UnsupportedOperationException("Announcements are not implemented for " + account.game)
+        }
+        val params = linkedMapOf(
+            "game" to game, "game_biz" to gameBiz, "bundle_id" to gameBiz,
+            "platform" to "pc", "region" to account.server, "uid" to account.uid,
+            "level" to level.toString(), "lang" to language
+        )
+        if (account.game == ApiGame.STARRAIL) params["channel_id"] = "1"
+        val base = route(ApiScope.ANNOUNCEMENT, account.game, account.region)
+        val info = transport.send(
+            base, "announcement/api/getAnnList", cookie, account.region, language,
+            "GET", params, null, rpcHeaders = true, signed = true
+        )
+        val details = transport.send(
+            base, "announcement/api/getAnnContent", cookie, account.region, language,
+            "GET", params, null, rpcHeaders = true, signed = true
+        )
+        val detailRows = details.optJSONArray("list") ?: JSONArray()
+        val groups = mutableListOf<JSONArray>()
+        info.optJSONArray("list")?.let(groups::add)
+        info.optJSONArray("pic_list")?.optJSONObject(0)?.optJSONArray("type_list")?.let(groups::add)
+        val output = JSONArray()
+        val byTitle = linkedMapOf<String, JSONObject>()
+        for (group in groups) {
+            for (i in 0 until group.length()) {
+                val sub = group.optJSONObject(i)?.optJSONArray("list") ?: continue
+                for (j in 0 until sub.length()) {
+                    val announcement = sub.optJSONObject(j) ?: continue
+                    val id = announcement.opt("ann_id")?.toString()
+                    val detail = (0 until detailRows.length()).asSequence()
+                        .mapNotNull { detailRows.optJSONObject(it) }
+                        .firstOrNull { it.opt("ann_id")?.toString() == id }
+                    val merged = JSONObject(announcement.toString())
+                    if (detail != null) {
+                        val keys = detail.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            merged.put(key, detail.opt(key))
+                        }
+                    }
+                    val title = merged.optString("title")
+                    val existing = byTitle[title]
+                    if (existing != null) {
+                        listOf("banner", "img").forEach { key ->
+                            if (merged.has(key) && !merged.isNull(key)) existing.put(key, merged.opt(key))
+                        }
+                    } else {
+                        byTitle[title] = merged
+                        output.put(merged)
+                    }
+                }
+            }
+        }
+        return JSONObject().put("list", output)
+    }
+
     private fun isRefreshable(error: HoYoApiException): Boolean {
         val message = error.message.orEmpty()
         return listOf("(-100)", "(-101)", "(10001)", "(10101)").any(message::contains)
@@ -320,9 +447,15 @@ class UpstreamApiClient(
 
     private fun jsonBody(params: Map<String, String>): JSONObject = JSONObject().apply {
         for ((key, value) in params) {
-            val parsed = if (key in setOf("avatar_list", "entry_page_ids", "character_ids")) {
-                try { JSONArray(value) as Any } catch (_: Exception) { value }
-            } else value
+            val parsed: Any = when {
+                key in setOf("avatar_list", "entry_page_ids", "character_ids", "types") ->
+                    try { JSONArray(value) } catch (_: Exception) { value }
+                key in setOf("is_first_brush", "is_cancel", "sync_all_roles") ->
+                    value.equals("true", ignoreCase = true)
+                key in setOf("game_id", "role_id", "page_size", "page", "size", "task_id", "award_id") ->
+                    value.toLongOrNull() ?: value
+                else -> value
+            }
             put(key, parsed)
         }
     }

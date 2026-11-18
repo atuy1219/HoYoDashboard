@@ -116,7 +116,7 @@ object UpstreamCatalog {
         r("get_honkai_memorial_arena", "記憶戦場", "戦闘記録", ApiGame.HONKAI, ApiScope.RECORD, "battleFieldReport"),
         r("get_honkai_notes", "リアルタイムノート", "デイリー", ApiGame.HONKAI, ApiScope.RECORD, "note"),
 
-        r("get_record_cards", "ゲームアカウント一覧", "HoYoLAB", null, ApiScope.CARD, "getGameRecordCard", defaults = mapOf("uid" to "{hoyolab_id}"), required = setOf("hoyolab_id")),
+        r("get_record_cards", "ゲームアカウント一覧", "HoYoLAB", null, ApiScope.CARD, "getGameRecordCard"),
 
         r("get_reward_info", "デイリーチェックイン状況", "HoYoLAB", null, ApiScope.REWARD, "info"),
         r("get_monthly_rewards", "デイリーチェックイン報酬一覧", "HoYoLAB", null, ApiScope.REWARD, "home"),
@@ -173,10 +173,11 @@ object UpstreamCatalog {
         r("get_hoyolab_user", "HoYoLABユーザー", "HoYoLAB", null, ApiScope.BBS, "community/painter/wapi/user/full"),
         r("get_web_events", "HoYoLAB Webイベント", "HoYoLAB", null, ApiScope.BBS, "community/community_contribution/wapi/event/list", defaults = mapOf("size" to "15", "offset" to "")),
         r("get_mimo_games", "Mimo対応ゲーム", "HoYoLAB", null, ApiScope.MIMO, "index"),
+        r("get_mimo_point_count", "Mimoポイント残高", "HoYoLAB", null, ApiScope.MIMO, "index"),
         r("get_mimo_tasks", "Mimoタスク", "HoYoLAB", null, ApiScope.MIMO, "task-list", required = setOf("game_id", "version_id")),
         r("get_mimo_shop_items", "Mimoショップ", "HoYoLAB", null, ApiScope.MIMO, "exchange-list", required = setOf("game_id", "version_id")),
         r("get_mimo_lottery_info", "Mimo抽選情報", "HoYoLAB", null, ApiScope.MIMO, "lottery-info", required = setOf("game_id", "version_id")),
-        r("get_mimo_point_history", "Mimoポイント履歴", "HoYoLAB", null, ApiScope.MIMO, "point-record", required = setOf("game_id", "version_id")),
+        r("get_mimo_point_history", "Mimoポイント履歴", "HoYoLAB", null, ApiScope.MIMO, "point-record", defaults = mapOf("page" to "1", "page_size" to "20"), required = setOf("game_id", "version_id", "operator_type")),
         r("get_accompany_characters", "HoYoLABコンパニオン", "HoYoLAB", null, ApiScope.BBS, "community/painter/api/getChannelRoleList", "READ_POST"),
         r("get_accompany_character_details", "コンパニオン情報", "HoYoLAB", null, ApiScope.BBS, "community/painter/api/topic/info", defaults = mapOf("scene" to "SceneAll"), required = setOf("topic_id")),
         r("get_accompany_character_posts", "コンパニオン投稿", "HoYoLAB", null, ApiScope.BBS, "community/post/api/topic/post/list", "READ_POST", defaults = mapOf("scene" to "1", "list_type" to "hot", "page_size" to "15", "is_first_brush" to "true", "last_id" to "", "client_param" to "", "session_param" to ""), required = setOf("topic_id")),

@@ -225,10 +225,11 @@ class UpstreamApiClient(
             params.putIfAbsent("offset", "")
         }
         if (method.scope == ApiScope.REWARD) {
-            params["lang"] = language
             if (account.region == ApiRegion.CHINESE) {
                 params["uid"] = account.uid
                 params["region"] = account.server
+            } else {
+                params["lang"] = language
             }
         }
         if (method.scope == ApiScope.LEDGER) {
@@ -300,16 +301,33 @@ class UpstreamApiClient(
         } else params
         val body = if (post) jsonBody(params) else null
         val headers = when (method.scope) {
-            ApiScope.REWARD -> mapOf(
-                "x-rpc-signgame" to when (account.game) {
+            ApiScope.REWARD -> {
+                val signGame = when (account.game) {
                     ApiGame.GENSHIN -> "hk4e"
                     ApiGame.STARRAIL -> "hkrpg"
                     ApiGame.ZZZ -> "zzz"
                     ApiGame.HONKAI -> "bh3"
                     ApiGame.TOT -> "nxx"
-                },
-                "Referer" to "https://act.hoyolab.com/"
-            )
+                }
+                if (account.region == ApiRegion.OVERSEAS) {
+                    mapOf(
+                        "x-rpc-signgame" to signGame,
+                        "Referer" to "https://act.hoyolab.com/"
+                    )
+                } else {
+                    mapOf(
+                        "x-rpc-signgame" to signGame,
+                        "DS" to simpleDynamicSecret("LyD1rXqMv2GJhnwdvCBjFOKGiKuLY3aO"),
+                        "x-rpc-app_version" to "2.70.1",
+                        "x-rpc-client_type" to "5",
+                        "x-rpc-device_id" to java.util.UUID.randomUUID().toString(),
+                        "x-rpc-sys_version" to "12",
+                        "x-rpc-platform" to "android",
+                        "x-rpc-channel" to "miyousheluodi",
+                        "x-rpc-device_model" to cookieValue(cookie, "ltuid_v2", "ltuid", "account_id").orEmpty()
+                    )
+                }
+            }
             ApiScope.CALCULATOR -> mapOf(
                 "Referer" to if (account.region == ApiRegion.OVERSEAS) {
                     "https://act.hoyolab.com/"
@@ -338,8 +356,8 @@ class UpstreamApiClient(
         )
         val signed = method.scope in setOf(
             ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT
-        ) || ((method.scope == ApiScope.REWARD || method.scope == ApiScope.CULTIVATE ||
-            method.scope == ApiScope.HSR_WARP) && account.region == ApiRegion.CHINESE)
+        ) || ((method.scope == ApiScope.CULTIVATE || method.scope == ApiScope.HSR_WARP) &&
+            account.region == ApiRegion.CHINESE)
         return try {
             transport.send(
                 base, path, activeCookie, account.region, language,
@@ -359,6 +377,25 @@ class UpstreamApiClient(
                 rpcHeaders = rpcHeaders, signed = signed
             )
         }
+    }
+
+    private fun simpleDynamicSecret(salt: String): String {
+        val timestamp = System.currentTimeMillis() / 1000
+        val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        val random = SecureRandom()
+        val nonce = buildString { repeat(6) { append(alphabet[random.nextInt(alphabet.length)]) } }
+        val seed = "salt=$salt&t=$timestamp&r=$nonce"
+        val hash = MessageDigest.getInstance("MD5").digest(seed.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        return "$timestamp,$nonce,$hash"
+    }
+
+    private fun cookieValue(cookie: String, vararg names: String): String? {
+        val values = cookie.split(';').mapNotNull { part ->
+            val index = part.indexOf('=')
+            if (index <= 0) null else part.substring(0, index).trim() to part.substring(index + 1).trim()
+        }.toMap()
+        return names.firstNotNullOfOrNull { values[it] }
     }
 
     private suspend fun announcements(

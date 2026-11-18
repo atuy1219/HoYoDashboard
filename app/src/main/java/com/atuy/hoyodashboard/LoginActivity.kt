@@ -65,13 +65,17 @@ class LoginActivity : ComponentActivity() {
         val manager = CookieManager.getInstance()
         manager.flush()
         val allowed = setOf(
-            "ltuid", "ltoken", "ltuid_v2", "ltoken_v2", "ltmid_v2",
-            "account_id", "account_id_v2", "account_mid_v2", "cookie_token", "cookie_token_v2"
+            "ltuid", "ltoken", "ltuid_v2", "ltoken_v2", "ltmid", "ltmid_v2",
+            "account_id", "account_id_v2", "account_mid_v2",
+            "cookie_token", "cookie_token_v2", "stoken", "stoken_v2",
+            "login_ticket", "login_ticket_token", "e_nap_token", "e_hkrpg_token", "e_lrsag"
         )
         val cookies = linkedMapOf<String, String>()
         listOf(
             "https://www.hoyolab.com", "https://hoyolab.com",
-            "https://account.hoyoverse.com", "https://api-os-takumi.mihoyo.com"
+            "https://account.hoyoverse.com", "https://api-os-takumi.mihoyo.com",
+            "https://api-takumi.mihoyo.com", "https://sg-public-api.hoyolab.com",
+            "https://sg-act-public-api.hoyolab.com", "https://passport-api.mihoyo.com"
         ).forEach { site ->
             manager.getCookie(site)?.split(';')?.forEach { part ->
                 val separator = part.indexOf('=')

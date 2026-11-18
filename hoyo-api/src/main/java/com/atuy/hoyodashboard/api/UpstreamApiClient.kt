@@ -554,10 +554,13 @@ class UpstreamApiClient(
     ): JSONObject {
         val paginator = UpstreamPaginator(this)
         val result = JSONArray()
+        val cursorParameter = if (method.name in setOf(
+            "claimed_rewards", "genshin_diary_log", "starrail_diary_log", "get_zzz_diary_detail"
+        )) "current_page" else "page"
         paginator.pages(
             cookie, account, method, arguments,
             PageSpec(
-                cursorParameter = "current_page",
+                cursorParameter = cursorParameter,
                 itemsField = "list",
                 pageSize = pageSize,
                 maxPages = 100,

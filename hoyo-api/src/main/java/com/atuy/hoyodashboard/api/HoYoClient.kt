@@ -1,5 +1,6 @@
 package com.atuy.hoyodashboard.api
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -25,8 +26,10 @@ class HoYoClient(
                     } else {
                         DashboardItem(role, notes(cookie, role), null)
                     }
+                } catch (error: CancellationException) {
+                    throw error
                 } catch (error: Exception) {
-                    DashboardItem(role, null, error.message ?: "取得失敗")
+                    DashboardItem(role, null, japaneseApiError(error))
                 }
             }
         }.awaitAll()
@@ -35,7 +38,13 @@ class HoYoClient(
     suspend fun accounts(cookie: String): List<Role> = coroutineScope {
         listOf(ApiRegion.OVERSEAS, ApiRegion.CHINESE).map { region ->
             async {
-                runCatching { accounts(cookie, region) }.getOrDefault(emptyList())
+                try {
+                    accounts(cookie, region)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    emptyList()
+                }
             }
         }.awaitAll().flatten()
             .distinctBy { Triple(it.game, it.uid, it.region) }
@@ -167,18 +176,33 @@ class HoYoClient(
                 )
             }
             Game.ZZZ -> {
-                val battery = data.optJSONObject("battery_charge") ?: JSONObject()
-                val engagement = data.optJSONObject("engagement") ?: JSONObject()
+                val battery = data.optJSONObject("energy") ?: data.optJSONObject("battery_charge") ?: JSONObject()
+                val progress = battery.optJSONObject("progress") ?: battery
+                val engagement = data.optJSONObject("vitality") ?: data.optJSONObject("engagement") ?: JSONObject()
                 val score = engagement.int("current")
                 val maxScore = engagement.int("max")
+                val scratch = data.opt("card_sign")
+                val scratched = when (scratch) {
+                    is String -> scratch == "CardSignDone"
+                    is JSONObject -> scratch.optString("card_sign_state") == "CardSignDone"
+                    else -> data.optBoolean("scratch_card_completed")
+                }
+                val store = data.optString("video_store_state").ifBlank {
+                    data.optJSONObject("vhs_sale")?.optString("sale_state").orEmpty()
+                }
                 DailyNote(
-                    Progress(battery.int("current"), battery.int("max")),
-                    battery.long("seconds_till_full"),
+                    Progress(progress.int("current"), progress.int("max")),
+                    battery.long("restore", "seconds_till_full") ?: progress.long("restore", "seconds_till_full"),
                     Progress(score, maxScore),
                     maxScore > 0 && score >= maxScore,
                     listOf(
-                        Detail("スクラッチ", if (data.optBoolean("scratch_card_completed")) "完了" else "未完了"),
-                        Detail("ビデオ屋", data.optString("video_store_state").ifBlank { "—" })
+                        Detail("スクラッチ", if (scratched) "完了" else "未完了"),
+                        Detail("ビデオ屋", when (store) {
+                            "SaleStateDone" -> "売上を受取可能"
+                            "SaleStateNo" -> "開店前"
+                            "SaleStateDoing" -> "営業中"
+                            else -> "状況不明"
+                        })
                     )
                 )
             }
@@ -194,7 +218,7 @@ class HoYoClient(
                     null,
                     listOf(
                         Detail("訓練スコア", data.int("current_train_score").toString()),
-                        Detail("古の楽園", greedy.int("cur_reward").toString() + " / " + greedy.int("max_reward")),
+                        Detail("量子多様体", greedy.int("cur_reward").toString() + " / " + greedy.int("max_reward")),
                         Detail("超弦空間", ultra.int("group_level").toString() + " · " + ultra.int("challenge_score")),
                         Detail("記憶戦場", arena.int("cur_reward").toString() + " / " + arena.int("max_reward")),
                         Detail("往世楽土", godWar.int("cur_reward").toString() + " / " + godWar.int("max_reward"))
@@ -258,13 +282,13 @@ class HoYoClient(
             val status = connection.responseCode
             val payload = (if (status in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (status !in 200..299) throw HoYoApiException("HTTP $status")
+            if (status !in 200..299) throw HoYoApiException("HTTP $status", httpStatus = status)
             val root = JSONObject(payload)
             mergeSetCookies(cookie, connection.headerFields)
             val code = root.optInt("retcode", root.optInt("code", 0))
             if (code != 0) {
                 throw HoYoApiException(
-                    root.optString("message").ifBlank { "API error $code" } + " ($code)"
+                    root.optString("message").ifBlank { "通信エラー" } + " ($code)", code
                 )
             }
             root.optJSONObject("data") ?: JSONObject()

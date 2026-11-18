@@ -1,5 +1,7 @@
 package com.atuy.hoyodashboard.api
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -60,6 +62,8 @@ class UpstreamActions(
         name: String,
         arguments: Map<String, String>
     ): JSONObject {
+        if (name == "check_in_community") throw UnsupportedOperationException("HoYoLABコミュニティのチェックインは終了しました")
+        val operation = if (name == "browse_accompany_character_post") "browse_accompany_post" else name
         fun required(key: String): String = arguments[key]?.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException(key + " is required")
         fun long(key: String): Long = required(key).toLongOrNull()
@@ -75,14 +79,14 @@ class UpstreamActions(
                 }
             } ?: default
 
-        require(availableActions(account).any { it.name == name }) {
+        require(availableActions(account).any { it.name == operation }) {
             "Action is not available for this account: " + name
         }
-        val mimoGame = if (name in setOf("finish_mimo_task", "claim_mimo_task_reward", "buy_mimo_shop_item", "draw_mimo_lottery") &&
+        val mimoGame = if (operation in setOf("finish_mimo_task", "claim_mimo_task_reward", "buy_mimo_shop_item", "draw_mimo_lottery") &&
             (arguments["game_id"].isNullOrBlank() || arguments["version_id"].isNullOrBlank())
         ) api.mimoGame(cookie, account, arguments["game_id"]?.toIntOrNull()) else null
         fun mimoId(key: String): Int = mimoGame?.getInt(key) ?: int(key)
-        return when (name) {
+        return when (operation) {
             "claim_daily_reward" -> claimDailyReward(
                 cookie, account,
                 arguments.filterKeys { it in setOf("geetest_challenge", "geetest_validate", "geetest_seccode") }
@@ -107,7 +111,8 @@ class UpstreamActions(
             "browse_accompany_post" -> browseAccompanyPost(cookie, account, long("post_id"), long("topic_id"))
             "set_accompany_voice_setting" -> setAccompanyVoiceSetting(
                 cookie, account, int("game_id"), long("role_id"),
-                required("voice_language"), required("script_language"), bool("sync_all_roles")
+                arguments["voice_lang"] ?: required("voice_language"),
+                arguments["script_lang"] ?: required("script_language"), bool("sync_all_roles")
             )
             else -> throw IllegalArgumentException("Unknown action: " + name)
         }
@@ -147,6 +152,24 @@ class UpstreamActions(
             url, "sign", cookie, account.region, language, "POST",
             params, null, headers
         )
+    }
+
+    suspend fun claimDailyRewardItem(
+        cookie: String,
+        account: ApiAccount,
+        challenge: Map<String, String> = emptyMap(),
+        reward: Boolean = true
+    ): RewardItem? {
+        val sign = claimDailyReward(cookie, account, challenge)
+        if (sign.optInt("gt_result") == 1 || sign.optBoolean("is_risk")) {
+            throw HoYoApiException("本人確認が必要です", 10035)
+        }
+        if (!reward) return null
+        return coroutineScope {
+            val status = async { api.call(cookie, account, "get_reward_info") }
+            val rewards = async { UpstreamModelParser.rewards(api.call(cookie, account, "get_monthly_rewards")) }
+            rewards.await().getOrNull(status.await().optInt("total_sign_day") - 1)
+        }
     }
 
     suspend fun redeemCode(

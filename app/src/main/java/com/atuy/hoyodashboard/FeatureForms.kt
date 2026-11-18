@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import com.atuy.hoyodashboard.api.japaneseApiError
 import com.atuy.hoyodashboard.api.ApiGame
 import com.atuy.hoyodashboard.api.ApiMethod
 import com.atuy.hoyodashboard.api.ApiScope
@@ -43,7 +44,7 @@ internal data class FeatureField(
 )
 
 private val lineupModes = linkedMapOf(
-    "Chasm" to "忘却の庭", "Story" to "虚構叙事", "Boss" to "末日の幻影", "Peak" to "異相演算"
+    "Chasm" to "忘却の庭", "Story" to "虚構叙事", "Boss" to "末日の幻影", "Peak" to "異相の仲裁"
 )
 
 internal fun featureFields(method: ApiMethod, game: ApiGame, region: ApiRegion): List<FeatureField> {
@@ -216,7 +217,7 @@ internal fun StarRailLineupForm(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            error = exception.message ?: "開催期間を取得できませんでした"
+            error = japaneseApiError(exception)
         } finally {
             loading = false
         }

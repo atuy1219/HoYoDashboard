@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,12 +23,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.atuy.hoyodashboard.api.localizeDiarySource
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.ZoneId
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -35,17 +36,26 @@ internal data class ResultLink(val label: String, val method: String, val argume
 
 private val titleFields = listOf(
     "name", "title", "name_mi18n", "name_text", "nickname", "nick_name", "avatar_name", "role_name",
-    "task_name", "item_name", "monster_name", "maze_name", "name_cn", "stage_name", "level_name"
+    "task_name", "item_name", "monster_name", "maze_name", "stage_name", "level_name",
+    "pool_name", "full_name_mi18n", "skill_name", "ending_record_name", "name_cn"
 )
 private val portraitFields = listOf(
     "icon", "icon_url", "avatar_icon", "avatar_url", "avatar_icon_url", "avatar_square_icon",
-    "square_icon", "square_icon_url", "role_square_url", "role_icon", "monster_icon", "head_icon", "card_icon", "image_url"
+    "square_icon", "square_icon_url", "role_square_url", "role_icon", "monster_icon", "head_icon", "card_icon", "image_url",
+    "big_icon", "role_image", "avatar_background_path", "cur_head_icon_url"
 )
 private val bannerFields = listOf("banner", "img", "imgs", "cover", "cover_url", "cover_urls", "image", "picture")
-private val proseFields = setOf("desc", "description", "content", "text", "summary", "intro", "brief", "simple_desc")
+private val proseFields = setOf(
+    "desc", "description", "content", "text", "summary", "intro", "brief", "simple_desc",
+    "desc_mi18n", "effect_description", "skill_description", "two_piece_description", "four_piece_description",
+    "introduction", "introduce", "rich_desc", "window_text"
+)
 private val hiddenFields = setOf(
     "retcode", "message", "next_page_token", "next_end_id", "next_max_id", "end_id", "cursor",
-    "last_id", "client_param", "session_param", "has_more", "is_last", "is_end", "authkey", "token", "cookie"
+    "last_id", "client_param", "session_param", "has_more", "is_last", "is_end", "authkey", "token", "cookie",
+    "cookie_token", "cookie_token_v2", "stoken", "stoken_v2", "ltoken", "ltoken_v2", "combo_token",
+    "game_token", "login_ticket", "pass_token", "verify_str", "uuid", "lang", "original_lang", "tzinfo",
+    "property_map", "relic_property_options", "version_id", "ann_id", "schedule_id"
 )
 private val idFields = setOf(
     "id", "uid", "game_uid", "avatar_id", "character_id", "weapon_id", "item_id", "reliquary_id", "role_id",
@@ -76,7 +86,17 @@ internal fun FeatureResult(
             else -> result
         }
     }
-    ResultObject(root, method, onOpen, depth = 0)
+    var translate by remember(root, method) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (method in translatableFeatures) {
+            TextButton(onClick = { translate = !translate }) {
+                Text(if (translate) "原文を表示" else "日本語に翻訳")
+            }
+        }
+        CompositionLocalProvider(LocalJapaneseTranslation provides translate) {
+            ResultObject(root, method, onOpen, depth = 0)
+        }
+    }
 }
 
 @Composable
@@ -112,7 +132,12 @@ private fun ResultObject(
         if (title != null || portrait != null) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 FeatureImage(portrait)
-                title?.let { Text(displayText(it), fontWeight = FontWeight.SemiBold) }
+                title?.let {
+                    if (method in translatableFeatures && result.keys().asSequence().none { key ->
+                            key in setOf("nickname", "nick_name", "author_nickname")
+                        }) JapaneseContent(it, MaterialTheme.typography.titleSmall)
+                    else Text(displayText(it), fontWeight = FontWeight.SemiBold)
+                }
             }
         }
         for ((key, value) in entries) {
@@ -133,6 +158,7 @@ private fun ResultObject(
                         }
                     }
                 }
+                null -> Unit
                 else -> {
                     val url = (value as? String)?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
                     if (url != null) {
@@ -145,7 +171,7 @@ private fun ResultObject(
                     val text = formatValue(key, value, method)
                     if (text.isBlank()) continue
                     if (key in proseFields) {
-                        Text(text, style = MaterialTheme.typography.bodyMedium)
+                        JapaneseContent(text)
                         (value as? String)?.let { raw ->
                             htmlImage.findAll(raw).map { it.groupValues[1] }
                                 .mapNotNull(::publicImageUrl).distinct().take(6).forEach { FeatureImage(it, wide = true) }
@@ -209,7 +235,7 @@ private fun ResultList(
                 is String -> {
                     val image = publicImageUrl(item)
                     if (image != null) FeatureImage(image, wide = true)
-                    else Text(displayText(item), style = MaterialTheme.typography.bodyMedium)
+                    else JapaneseContent(item)
                 }
                 is Number -> Text(formatValue("", item, method))
             }
@@ -247,24 +273,14 @@ private fun formatValue(key: String, value: Any?, method: String?): String {
     if (key == "status" && method == "get_mimo_shop_items") {
         return mapOf("1" to "交換可能", "2" to "交換不可", "3" to "交換上限", "4" to "在庫切れ")[text] ?: text
     }
-    if (key == "action" && method in setOf("diary", "get_zzz_diary_detail")) return localizeDiarySource(text)
-    if (key == "game_id") {
-        return mapOf("1" to "崩壊3rd", "2" to "原神", "4" to "未定事件簿",
-            "5" to "HoYoLAB", "6" to "崩壊：スターレイル", "8" to "ゼンレスゾーンゼロ")[text] ?: text
-    }
-    if (key in setOf("root_type", "lineup_type")) {
-        return mapOf("Chasm" to "忘却の庭", "Story" to "虚構叙事", "Boss" to "末日の幻影",
-            "Peak" to "異相演算")[text] ?: text
-    }
-    if (key == "element") {
-        return mapOf("Pyro" to "炎", "Hydro" to "水", "Anemo" to "風", "Electro" to "雷",
-            "Dendro" to "草", "Cryo" to "氷", "Geo" to "岩")[text] ?: text
-    }
-    if (key in setOf("time", "start_time", "end_time", "create_time", "timestamp", "created_at", "updated_at")) {
-        val number = text.toLongOrNull()
-        val instant = when (number ?: 0L) {
-            in 946684800L..4102444800L -> Instant.ofEpochSecond(checkNotNull(number))
-            in 946684800000L..4102444800000L -> Instant.ofEpochMilli(checkNotNull(number))
+    localizedApiValue(key, text, method)?.let { return it }
+    if (key in dateFields || key.endsWith("_datetime") || key.endsWith("_date_time")) {
+        val offset = runCatching { OffsetDateTime.parse(text.replace(' ', 'T')) }.getOrNull()
+        if (offset != null) return dateFormat.format(offset.atZoneSameInstant(ZoneId.of("Asia/Tokyo")))
+        val number = text.toLongOrNull() ?: 0L
+        val instant = when (number) {
+            in 946684800L..4102444800L -> Instant.ofEpochSecond(number)
+            in 946684800000L..4102444800000L -> Instant.ofEpochMilli(number)
             else -> null
         }
         if (instant != null) return dateFormat.format(instant.atZone(ZoneId.of("Asia/Tokyo")))
@@ -303,3 +319,14 @@ private fun resultLinks(method: String?, item: JSONObject): List<ResultLink> {
         else -> emptyList()
     }
 }
+
+private val dateFields = setOf(
+    "time", "start_time", "begin_time", "end_time", "create_time", "timestamp", "created_at", "updated_at",
+    "match_time", "challenge_time", "floor_challenge_time", "hadal_begin_time", "hadal_end_time"
+)
+private val translatableFeatures = setOf(
+    "get_wiki_previews", "get_wiki_page", "get_wiki_pages", "get_genshin_announcements",
+    "get_starrail_announcements", "get_zzz_announcements", "get_accompany_character_posts",
+    "get_accompany_character_details", "get_web_events", "get_tcg_decks", "get_tcg_deck",
+    "get_tcg_deck_comments", "get_tcg_card_effect", "get_lineups", "get_lineup_details", "teapot_replicas"
+)

@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.atuy.hoyodashboard.api.japaneseApiError
 import com.atuy.hoyodashboard.api.ApiMethod
 import com.atuy.hoyodashboard.api.UpstreamFeatureClient
 import kotlinx.coroutines.CancellationException
@@ -72,7 +73,7 @@ internal fun FeatureDirectory(features: UpstreamFeatureClient, categoryFilter: S
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
-                FeaturePage(request, error = exception.message ?: "取得できませんでした")
+                FeaturePage(request, error = japaneseApiError(exception))
             }
             if (stack.getOrNull(index)?.request == request) {
                 stack = stack.toMutableList().apply { set(index, page) }

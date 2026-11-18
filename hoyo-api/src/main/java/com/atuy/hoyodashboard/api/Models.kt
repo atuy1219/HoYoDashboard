@@ -36,4 +36,4 @@ data class DailyNote(
 
 data class DashboardItem(val role: Role, val note: DailyNote?, val error: String?)
 
-class HoYoApiException(message: String) : Exception(message)
+class HoYoApiException(message: String, val code: Int? = null, val httpStatus: Int? = null) : Exception(message)

@@ -2,7 +2,6 @@ package com.atuy.hoyodashboard
 
 import android.text.Html
 import com.atuy.hoyodashboard.api.ApiGame
-import java.util.Locale
 
 internal fun displayText(value: String): String = if ('<' in value || '&' in value) {
     Html.fromHtml(value.replace(Regex("(?is)<(style|script)\\b[^>]*>.*?</\\1>"), ""), Html.FROM_HTML_MODE_COMPACT)
@@ -79,10 +78,7 @@ internal fun bannerLabel(game: ApiGame, type: Int): String = when (game) {
     else -> "ガチャ"
 }
 
-internal fun fieldLabel(key: String): String = fieldLabels[key] ?: key
-    .replace(Regex("([a-z])([A-Z])"), "$1 $2")
-    .replace('_', ' ')
-    .replaceFirstChar { it.titlecase(Locale.ROOT) }
+internal fun fieldLabel(key: String): String = fieldLabels[key] ?: japaneseFieldFallback(key)
 
 private val fieldLabels = buildMap {
     fun add(label: String, vararg keys: String) = keys.forEach { put(it, label) }
@@ -133,18 +129,18 @@ private val fieldLabels = buildMap {
     add("深境螺旋", "spiral_abyss")
     add("深境螺旋（前期）", "previous_spiral_abyss")
     add("幻想シアター", "imaginarium_theater")
-    add("追憶のエコー", "envisaged_echoes")
+    add("空想の軌跡", "envisaged_echoes")
     add("幽境の激戦", "stygian_onslaught")
     add("忘却の庭", "forgotten_hall")
     add("模擬宇宙", "simulated_universe")
     add("虚構叙事", "pure_fiction")
     add("末日の幻影", "apocalyptic_shadow")
-    add("異相演算", "anomaly_arbitration")
-    add("式輿防衛", "shiyu_defense")
+    add("異相の仲裁", "anomaly_arbitration")
+    add("式輿防衛戦", "shiyu_defense")
     add("危局強襲戦", "deadly_assault")
-    add("殲滅シミュレーション", "annihilation_simulacrum")
+    add("仮想殲滅作戦", "annihilation_simulacrum")
     add("零号ホロウ", "lost_void")
-    add("閾値シミュレーション", "threshold_simulation", "threshold_simulation_brief")
+    add("臨界推演", "threshold_simulation", "threshold_simulation_brief")
     add("量子多様体", "old_abyss")
     add("超弦空間", "superstring_abyss")
     add("記憶戦場", "memorial_arena")

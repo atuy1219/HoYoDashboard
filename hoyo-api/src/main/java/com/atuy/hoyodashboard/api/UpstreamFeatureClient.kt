@@ -21,6 +21,27 @@ class UpstreamFeatureClient(
         arguments: Map<String, String> = emptyMap()
     ): JSONObject = api.call(cookieProvider(), account, method, arguments)
 
+    suspend fun checkInStatus(): CheckInStatus = rewardStatus().let {
+        CheckInStatus(it.optBoolean("is_sign"), it.optInt("total_sign_day"))
+    }
+
+    suspend fun starRailWarpBrief(): WarpBrief = raw("get_starrail_warp_brief").warpBrief()
+
+    suspend fun starRailWarpPools(bannerType: Int): List<WarpPool> =
+        raw("get_starrail_warp_pool_stats", mapOf("banner_type" to bannerType.toString())).warpPools()
+
+    suspend fun starRailFiveStarWarps(bannerType: Int): FiveStarWarpHistory =
+        raw("get_starrail_five_star_warps", mapOf("banner_type" to bannerType.toString())).fiveStarHistory()
+
+    suspend fun recordCards(hoyolabId: Long? = null): List<AccountCard> {
+        val args = hoyolabId?.let { mapOf("hoyolab_id" to it.toString()) } ?: emptyMap()
+        return raw("get_record_cards", args).jsonList().map {
+            AccountCard(it.optString("game_role_id").ifBlank { null }, it.optInt("game_id"),
+                it.optString("nickname"), it.optInt("level").takeIf { level -> level > 0 },
+                it.optString("region_name").ifBlank { null })
+        }
+    }
+
     suspend fun profile(): GameProfile {
         val method = when (account.game) {
             ApiGame.GENSHIN -> "get_genshin_user"
@@ -42,6 +63,9 @@ class UpstreamFeatureClient(
         }
         return UpstreamModelParser.characters(raw(method))
     }
+
+    suspend fun characterBuilds(): List<CharacterBuild> =
+        detailedCharacters().map(::characterBuild)
 
     suspend fun detailedCharacters(): List<JSONObject> {
         val method = when (account.game) {

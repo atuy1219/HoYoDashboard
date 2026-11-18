@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.atuy.hoyodashboard.api.japaneseApiError
 import com.atuy.hoyodashboard.api.DashboardItem
 import com.atuy.hoyodashboard.api.HoYoClient
 import kotlinx.coroutines.delay
@@ -84,7 +85,7 @@ private fun Dashboard() {
                 selectedItem = updated.firstOrNull { it.role == current.role }
             }
         } catch (exception: Exception) {
-            error = exception.message ?: "取得失敗"
+            error = japaneseApiError(exception)
         } finally {
             loading = false
         }

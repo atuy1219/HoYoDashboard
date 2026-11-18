@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.atuy.hoyodashboard.api.japaneseApiError
 import com.atuy.hoyodashboard.api.EnhancementCalculator
 import com.atuy.hoyodashboard.api.EnhancementPlan
 import com.atuy.hoyodashboard.api.FurnishingQuantity
@@ -90,7 +91,7 @@ internal fun CalculatorScreen(features: UpstreamFeatureClient) {
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
-                error = exception.message ?: "素材を計算できませんでした"
+                error = japaneseApiError(exception)
             } finally {
                 calculating = false
             }
@@ -230,7 +231,7 @@ private fun CalculatorPicker(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            error = exception.message ?: "対象を取得できませんでした"
+            error = japaneseApiError(exception)
         }
     }
     AlertDialog(

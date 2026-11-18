@@ -13,7 +13,7 @@ data class PageSpec(
     val moreField: String = "has_more",
     val pageSize: Int? = null,
     val lastItemCursorField: String? = null,
-    val maxPages: Int = 100,
+    val maxPages: Int? = null,
     val pauseMilliseconds: Long = 250
 )
 
@@ -25,10 +25,10 @@ class UpstreamPaginator(private val client: UpstreamApiClient) {
         arguments: Map<String, String> = emptyMap(),
         spec: PageSpec = PageSpec()
     ): Flow<JSONObject> = flow {
-        require(spec.maxPages in 1..1000)
+        require(spec.maxPages == null || spec.maxPages > 0)
         require(spec.pauseMilliseconds in 0..60_000)
         var cursor: String? = arguments[spec.cursorParameter]
-        var previousCursor: String? = null
+        val cursors = hashSetOf<String>()
         var page = 0
         do {
             val query = arguments.toMutableMap()
@@ -67,13 +67,14 @@ class UpstreamPaginator(private val client: UpstreamApiClient) {
                 spec.pageSize != null -> rows.length() >= spec.pageSize
                 else -> nextCursor.isNotBlank()
             }
-            previousCursor = cursor
+            query[spec.cursorParameter]?.let(cursors::add)
             cursor = if (isPageNumber) {
                 (query[spec.cursorParameter]?.toIntOrNull() ?: 1).plus(1).toString()
             } else nextCursor
-            if (!hasMore || cursor.isNullOrBlank() || cursor == previousCursor) break
-            if (page < spec.maxPages) delay(spec.pauseMilliseconds)
-        } while (page < spec.maxPages)
+            if (!hasMore || cursor.isNullOrBlank() || cursor == "0" || cursor in cursors) break
+            if (spec.maxPages != null && page >= spec.maxPages) break
+            delay(spec.pauseMilliseconds)
+        } while (true)
     }
 
     fun items(

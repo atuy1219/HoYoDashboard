@@ -23,7 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,10 +41,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.atuy.hoyodashboard.api.japaneseApiError
 import com.atuy.hoyodashboard.api.ApiAccount
 import com.atuy.hoyodashboard.api.ApiGame
 import com.atuy.hoyodashboard.api.ApiRegion
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import com.atuy.hoyodashboard.api.CharacterPreview
+import com.atuy.hoyodashboard.api.CheckInStatus
+import com.atuy.hoyodashboard.api.RewardItem
 import com.atuy.hoyodashboard.api.DailyNote
 import com.atuy.hoyodashboard.api.DashboardItem
 import com.atuy.hoyodashboard.api.DiarySummary
@@ -91,10 +98,7 @@ internal fun GameDetailScreen(
         UpstreamFeatureClient(api, { SecureCookieStore.read(context).orEmpty() }, account)
     }
     val actions = remember { UpstreamActions() }
-    val tabs = remember(account) {
-        tabsFor(item.role.game).filterNot { it == DetailTab.DIARY &&
-            account.game == ApiGame.ZZZ && account.region == ApiRegion.CHINESE }
-    }
+    val tabs = remember(item.role.game) { tabsFor(item.role.game) }
 
     var selectedIndex by remember(item.role) { mutableIntStateOf(0) }
     var refreshToken by remember(item.role) { mutableIntStateOf(0) }
@@ -153,7 +157,7 @@ internal fun GameDetailScreen(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            activeError = exception.message ?: "取得に失敗しました"
+            activeError = japaneseApiError(exception)
         } finally {
             activeLoading = false
         }
@@ -185,7 +189,7 @@ internal fun GameDetailScreen(
                 onRefresh()
             }) { Text("更新") }
         }
-        ScrollableTabRow(selectedTabIndex = selectedIndex) {
+        PrimaryScrollableTabRow(selectedTabIndex = selectedIndex) {
             tabs.forEachIndexed { index, tab ->
                 Tab(
                     selected = selectedIndex == index,
@@ -218,7 +222,7 @@ internal fun GameDetailScreen(
                 }
                 DetailTab.CHARACTERS -> {
                     val rows = characters
-                    if (rows != null) CharacterList(rows, characterDetails.orEmpty())
+                    if (rows != null) CharacterList(rows, characterDetails.orEmpty(), account.game)
                 }
                 DetailTab.BATTLE -> key(refreshToken) { FeatureDirectory(features, "戦闘記録") }
                 DetailTab.GACHA -> {
@@ -362,7 +366,7 @@ private fun ProfileSummary(profile: GameProfile) {
 }
 
 @Composable
-private fun CharacterList(characters: List<CharacterPreview>, details: List<JSONObject>) {
+private fun CharacterList(characters: List<CharacterPreview>, details: List<JSONObject>, game: ApiGame) {
     val byId = remember(details) {
         details.associateBy { data ->
             data.optInt("id", data.optInt("avatar_id", data.optJSONObject("base")?.optInt("id") ?: 0))
@@ -384,7 +388,7 @@ private fun CharacterList(characters: List<CharacterPreview>, details: List<JSON
                     Text(character.name.ifBlank { "キャラクター ${character.id}" }, fontWeight = FontWeight.SemiBold)
                     if (character.level > 0) Text("Lv.${character.level}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (character.rarity > 0) Text("★${character.rarity}")
+                if (character.rarity > 0) Text(characterRarity(game, character.rarity))
             }
         }
         if (visible < characters.size) TextButton(onClick = { visible += 24 }) { Text("さらに表示") }
@@ -405,8 +409,10 @@ private fun CharacterList(characters: List<CharacterPreview>, details: List<JSON
 
 @Composable
 private fun GachaList(records: List<GachaRecord>, game: ApiGame) {
-    val fiveStars = records.count { it.rarity >= 5 }
-    val fourStars = records.count { it.rarity == 4 }
+    val topRarity = if (game == ApiGame.ZZZ) 4 else 5
+    val nextRarity = topRarity - 1
+    val fiveStars = records.count { it.rarity >= topRarity }
+    val fourStars = records.count { it.rarity == nextRarity }
     var limit by remember(records) { mutableIntStateOf(40) }
     val visibleRecords = records.take(limit)
     SectionCard("ガチャ履歴 " + records.size + "件取得") {
@@ -414,18 +420,18 @@ private fun GachaList(records: List<GachaRecord>, game: ApiGame) {
         val nextRank = if (game == ApiGame.ZZZ) "A級" else "★4"
         ValueRow(topRank, fiveStars.toString())
         ValueRow(nextRank, fourStars.toString())
-        val featured = records.count { it.rarity >= 5 && it.isUp == true }
+        val featured = records.count { it.rarity >= topRarity && it.isUp == true }
         if (featured > 0) ValueRow("$topRank ピックアップ", featured.toString())
         if (records.isEmpty()) Text("履歴がありません")
         records.groupBy {
             if (game == ApiGame.GENSHIN && it.bannerType == 400) 301 else it.bannerType
         }.toSortedMap().forEach { (bannerType, pool) ->
             val newestFirst = pool.sortedByDescending { it.timestamp }
-            val pity = newestFirst.takeWhile { it.rarity < 5 }.size
+            val pity = newestFirst.takeWhile { it.rarity < topRarity }.size
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(bannerLabel(game, bannerType), fontWeight = FontWeight.SemiBold)
                 ValueRow("前回の${topRank}から", (if (pity == pool.size) "確認できた範囲で " else "") + "${pity}回")
-                ValueRow("$topRank / $nextRank", pool.count { it.rarity >= 5 }.toString() + " / " + pool.count { it.rarity == 4 })
+                ValueRow("$topRank / $nextRank", pool.count { it.rarity >= topRarity }.toString() + " / " + pool.count { it.rarity == nextRarity })
             }
         }
         HorizontalDivider(color = Color(0xFF394252))
@@ -434,14 +440,16 @@ private fun GachaList(records: List<GachaRecord>, game: ApiGame) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(record.name, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                     Text(when {
-                        game == ApiGame.ZZZ -> mapOf(5 to "S級", 4 to "A級", 3 to "B級")[record.rarity] ?: "—"
+                        game == ApiGame.ZZZ -> mapOf(4 to "S級", 3 to "A級", 2 to "B級")[record.rarity] ?: "—"
                         record.rarity > 0 -> "★${record.rarity}"
                         else -> "—"
                     })
                 }
+                val time = if (record.timestamp > 0) Instant.ofEpochMilli(record.timestamp)
+                    .atZone(ZoneId.of("Asia/Tokyo")).format(gachaDateFormat) else record.time
                 Text(
-                    record.time + " · " + bannerLabel(game, record.bannerType) +
-                        (if (record.rarity >= 5 && record.isUp == true) " · UP" else ""),
+                    time + " · " + bannerLabel(game, record.bannerType) +
+                        (if (record.rarity >= topRarity && record.isUp == true) " · ピックアップ" else ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -545,11 +553,12 @@ private fun ActionPanel(
     var message by remember(account) { mutableStateOf<String?>(null) }
     var result by remember(account) { mutableStateOf<JSONObject?>(null) }
     var code by remember(account) { mutableStateOf("") }
-    var rewardStatus by remember(account) { mutableStateOf<JSONObject?>(null) }
+    var rewardStatus by remember(account) { mutableStateOf<CheckInStatus?>(null) }
+    var claimedItem by remember(account) { mutableStateOf<RewardItem?>(null) }
     var rewardsVersion by remember(account) { mutableIntStateOf(0) }
     LaunchedEffect(account, rewardsVersion) {
         rewardStatus = try {
-            features.rewardStatus()
+            features.checkInStatus()
         } catch (exception: CancellationException) {
             throw exception
         } catch (_: Exception) {
@@ -576,13 +585,11 @@ private fun ActionPanel(
             try {
                 val response = actions.execute(cookieProvider(), account, definition.name, arguments)
                 result = response
-                message = if (response.optInt("retcode", 0) == 0) {
-                    response.optString("message").ifBlank { "操作を完了しました" }
-                } else response.optString("message").ifBlank { "操作に失敗しました" }
+                message = "操作を完了しました"
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
-                message = exception.message ?: "操作に失敗しました"
+                message = japaneseApiError(exception)
             } finally {
                 busy = false
             }
@@ -591,8 +598,14 @@ private fun ActionPanel(
 
     SectionCard("デイリーチェックイン") {
         rewardStatus?.let {
-            ValueRow("本日", if (it.optBoolean("is_sign")) "チェックイン済み" else "未チェックイン")
-            ValueRow("今月のチェックイン", "${it.optInt("total_sign_day")} 日")
+            ValueRow("本日", if (it.signedIn) "チェックイン済み" else "未チェックイン")
+            ValueRow("今月のチェックイン", "${it.claimedDays} 日")
+        }
+        claimedItem?.let { reward ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                FeatureImage(reward.icon)
+                Text("${reward.name} ×${reward.amount}")
+            }
         }
         Button(
             onClick = {
@@ -600,25 +613,21 @@ private fun ActionPanel(
                     busy = true
                     message = null
                     result = null
+                    claimedItem = null
                     try {
-                        val response = actions.claimDailyReward(cookieProvider(), account)
-                        result = response.takeIf { it.has("award") || it.has("awards") }
-                        message = if (response.optInt("gt_result") == 1 || response.optBoolean("is_risk")) {
-                            "本人確認が必要です。HoYoLABでチェックインしてください"
-                        } else {
-                            rewardsVersion++
-                            "チェックインしました"
-                        }
+                        claimedItem = actions.claimDailyRewardItem(cookieProvider(), account)
+                        message = "チェックインしました"
                     } catch (exception: CancellationException) {
                         throw exception
                     } catch (exception: Exception) {
-                        message = exception.message ?: "チェックインに失敗しました"
+                        message = japaneseApiError(exception)
                     } finally {
+                        rewardsVersion++
                         busy = false
                     }
                 }
             },
-            enabled = !busy && cookieProvider().isNotBlank() && rewardStatus?.optBoolean("is_sign") != true,
+            enabled = !busy && cookieProvider().isNotBlank() && rewardStatus?.signedIn != true,
             modifier = Modifier.fillMaxWidth()
         ) { Text(if (busy) "処理中…" else "デイリーチェックイン") }
 
@@ -642,13 +651,11 @@ private fun ActionPanel(
                         try {
                             val response = actions.redeemCode(cookieProvider(), account, code)
                             result = response
-                            message = if (response.optInt("retcode", 0) == 0) {
-                                response.optString("message").ifBlank { "コード交換処理を完了しました" }
-                            } else response.optString("message").ifBlank { "コード交換に失敗しました" }
+                            message = "コードを交換しました"
                         } catch (exception: CancellationException) {
                             throw exception
                         } catch (exception: Exception) {
-                            message = exception.message ?: "コード交換に失敗しました"
+                            message = japaneseApiError(exception)
                         } finally {
                             busy = false
                         }
@@ -753,3 +760,9 @@ private fun ValueRow(label: String, value: String) {
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }
+
+private val gachaDateFormat = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss", Locale.JAPAN)
+
+private fun characterRarity(game: ApiGame, rarity: Int): String =
+    if (game == ApiGame.ZZZ) mapOf(5 to "S級", 4 to "A級", 3 to "B級")[rarity] ?: "★$rarity"
+    else "★$rarity"

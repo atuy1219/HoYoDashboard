@@ -58,10 +58,15 @@ data class CharacterPreview(
     companion object {
         fun from(value: JSONObject) = CharacterPreview(
             id = value.int("id", "avatar_id", "role_id"),
-            name = value.string("name", "avatar_name", "nickname"),
+            name = value.string("name", "name_mi18n", "avatar_name", "nickname", "full_name_mi18n", "character_name"),
             level = value.int("level", "avatar_level"),
-            rarity = value.int("rarity", "rank_type", "star"),
-            icon = value.stringOrNull("icon", "avatar_icon", "avatar_url", "avatar_square_icon", "square_icon", "image"),
+            rarity = when (value.optString("rarity")) {
+                "S" -> 5
+                "A" -> 4
+                "B" -> 3
+                else -> value.int("rarity", "rank_type", "star")
+            },
+            icon = value.stringOrNull("icon", "avatar_icon", "avatar_url", "avatar_square_icon", "role_square_url", "square_icon", "image", "avatar_background_path"),
             element = value.stringOrNull("element", "element_name"),
             weapon = value.stringOrNull("weapon_name", "weapon"),
             raw = value
@@ -148,7 +153,13 @@ internal fun mergeHistoryByTime(
     limit: Int?
 ): List<JSONObject> {
     val merged = groups.asSequence().flatten()
-        .sortedByDescending { it.optString("time") }
+        .sortedWith(compareByDescending<JSONObject> {
+            val text = it.optString("time").replace(" ", "T")
+            runCatching { java.time.OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrElse { _ ->
+                runCatching { java.time.LocalDateTime.parse(text)
+                    .toInstant(java.time.ZoneOffset.ofHours(8 + it.optInt("tz_offset"))).toEpochMilli() }.getOrDefault(0L)
+            }
+        }.thenByDescending { it.optString("time") })
         .toList()
     return if (limit != null && limit > 0) merged.take(limit) else merged
 }
@@ -189,8 +200,8 @@ object UpstreamModelParser {
         val stats = raw.optJSONObject("stats") ?: raw
         val avatars = raw.optJSONArray("avatars") ?: raw.optJSONArray("avatar_list")
             ?: raw.optJSONArray("list") ?: JSONArray()
-        val nickname = role.string("nickname", "name").ifBlank {
-            raw.string("nickname", "name")
+        val nickname = role.string("nickname", "nick_name", "name").ifBlank {
+            raw.string("nickname", "nick_name", "name")
         }
         val level = role.int("level", "player_level").takeIf { it > 0 }
             ?: stats.int("level", "player_level")
@@ -198,16 +209,16 @@ object UpstreamModelParser {
             ApiGame.GENSHIN -> GenshinProfile(
                 nickname, level,
                 stats.int("active_days", "active_days_count"),
-                stats.int("achievements", "achievement_count"),
-                avatars.length(),
+                stats.int("achievements", "achievement_count", "achievement_num"),
+                stats.int("avatar_num", "avatar_number", "avatar_count").takeIf { it > 0 } ?: avatars.length(),
                 stats.stringOrNull("spiral_abyss", "spiral_abyss_floor"),
                 raw
             )
             ApiGame.STARRAIL -> StarRailProfile(
                 nickname, level,
                 stats.int("active_days", "active_days_count"),
-                stats.int("achievements", "achievement_count"),
-                avatars.length(),
+                stats.int("achievements", "achievement_count", "achievement_num"),
+                stats.int("avatar_num", "avatar_number", "avatar_count").takeIf { it > 0 } ?: avatars.length(),
                 stats.stringOrNull("abyss_process", "forgotten_hall"),
                 raw
             )
@@ -217,7 +228,8 @@ object UpstreamModelParser {
                 ZzzProfile(
                     nickname, level,
                     stats.int("achievement_count", "achievements"),
-                    agents.length(), bangboos.length(), raw
+                    stats.int("avatar_num", "character_num").takeIf { it > 0 } ?: agents.length(),
+                    stats.int("buddy_num", "bangboo_obtained").takeIf { it > 0 } ?: bangboos.length(), raw
                 )
             }
             ApiGame.HONKAI -> HonkaiProfile(
@@ -315,7 +327,7 @@ object UpstreamModelParser {
 fun localizeDiarySource(source: String): String = when (source) {
     "daily_activity_rewards" -> "デイリー報酬"
     "growth_rewards" -> "育成報酬"
-    "shiyu_rewards" -> "式輿防衛"
+    "shiyu_rewards" -> "式輿防衛戦"
     "mail_rewards" -> "メール報酬"
     "hollow_rewards" -> "零号ホロウ"
     "event_rewards" -> "イベント報酬"

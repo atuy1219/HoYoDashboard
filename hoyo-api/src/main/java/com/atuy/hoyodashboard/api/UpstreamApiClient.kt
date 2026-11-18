@@ -27,7 +27,8 @@ data class ApiAccount(
 
 class UpstreamApiClient(
     private val language: String = "ja-jp",
-    private val transport: ApiTransport = ApiTransport()
+    private val transport: ApiTransport = ApiTransport(),
+    private val badges: BadgeSession = BadgeSession()
 ) {
     fun available(game: ApiGame): List<ApiMethod> =
         UpstreamCatalog.methods.filter { it.game == null || it.game == game }
@@ -64,10 +65,6 @@ class UpstreamApiClient(
         if (method.authKeyRequired && params["authkey"].isNullOrBlank()) {
             throw IllegalArgumentException("A separate gacha authkey is required.")
         }
-        if (method.requiresBadge) {
-            throw UnsupportedOperationException("Badge authentication is not implemented.")
-        }
-
         val base = route(method.scope, account.game, account.region)
         if (method.scope == ApiScope.RECORD) {
             if (method.useUidParam) {
@@ -147,10 +144,21 @@ class UpstreamApiClient(
             )
             else -> emptyMap()
         }
-        return transport.send(
-            base, path, cookie, account.region, language,
-            if (post) "POST" else "GET", query, body, headers
-        )
+        val activeCookie = if (method.requiresBadge) badges.cookieFor(cookie, account, language) else cookie
+        return try {
+            transport.send(
+                base, path, activeCookie, account.region, language,
+                if (post) "POST" else "GET", query, body, headers
+            )
+        } catch (error: HoYoApiException) {
+            if (!method.requiresBadge || !error.message.orEmpty().contains("(-100)")) throw error
+            badges.invalidate(account)
+            val refreshed = badges.cookieFor(cookie, account, language)
+            transport.send(
+                base, path, refreshed, account.region, language,
+                if (post) "POST" else "GET", query, body, headers
+            )
+        }
     }
 
     private fun jsonBody(params: Map<String, String>): JSONObject = JSONObject().apply {

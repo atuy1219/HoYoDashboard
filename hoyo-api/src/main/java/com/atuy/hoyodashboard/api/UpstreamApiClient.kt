@@ -27,7 +27,8 @@ class UpstreamApiClient(
     private val language: String = "ja-jp",
     private val onCookieUpdate: ((String) -> Unit)? = null,
     private val transport: ApiTransport = ApiTransport(onCookieUpdate),
-    private val badges: BadgeSession = BadgeSession()
+    private val badges: BadgeSession = BadgeSession(),
+    private val sessions: CookieSessionManager = CookieSessionManager(onCookieUpdate)
 ) {
     fun available(game: ApiGame): List<ApiMethod> =
         UpstreamCatalog.methods.filter { it.game == null || it.game == game }
@@ -238,9 +239,14 @@ class UpstreamApiClient(
                 if (post) "POST" else "GET", query, body, headers
             )
         } catch (error: HoYoApiException) {
-            if (!method.requiresBadge || !error.message.orEmpty().contains("(-100)")) throw error
-            badges.invalidate(account)
-            val refreshed = badges.cookieFor(cookie, account, language)
+            val message = error.message.orEmpty()
+            val refreshable = listOf("(-100)", "(-101)", "(10001)", "(10101)").any(message::contains)
+            if (!refreshable) throw error
+            if (method.requiresBadge) badges.invalidate(account)
+            val refreshedBase = sessions.refresh(cookie, account.region) ?: throw error
+            val refreshed = if (method.requiresBadge) {
+                badges.cookieFor(refreshedBase, account, language)
+            } else refreshedBase
             transport.send(
                 base, path, refreshed, account.region, language,
                 if (post) "POST" else "GET", query, body, headers
@@ -252,6 +258,7 @@ class UpstreamApiClient(
         require(account.region == ApiRegion.OVERSEAS) {
             "genshin.py only supports authkey generation for overseas accounts."
         }
+        val activeCookie = sessions.ensureGachaCookie(cookie, account.region)
         val body = JSONObject()
             .put("game_uid", account.uid)
             .put("region", account.server)
@@ -260,7 +267,7 @@ class UpstreamApiClient(
         val result = transport.send(
             "https://api-account-os.hoyoverse.com/binding/api",
             "genAuthKeyByCookieToken",
-            cookie,
+            activeCookie,
             account.region,
             language,
             "POST",

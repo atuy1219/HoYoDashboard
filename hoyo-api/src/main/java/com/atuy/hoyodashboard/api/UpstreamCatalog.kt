@@ -16,7 +16,7 @@ enum class ApiGame {
 
 enum class ApiScope {
     RECORD, CARD, LEDGER, ZZZ_LEDGER, CULTIVATE, REWARD, CALCULATOR,
-    LINEUP, HSR_LINEUP, HSR_WARP, CARD_PLAZA, TEAPOT, WIKI,
+    LINEUP, HSR_LINEUP, HSR_WARP, CARD_PLAZA, BOULEUTERION, TEAPOT, WIKI,
     GACHA, TRANSACTION, BBS, MIMO, WEBSTATIC, ANNOUNCEMENT
 }
 
@@ -145,9 +145,9 @@ object UpstreamCatalog {
         r("get_tcg_deck_labels", "デッキラベル", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "labels"),
         r("get_tcg_cards", "カード一覧", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "roles"),
         r("get_tcg_card_effect", "カード効果", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "role/skill", required = setOf("id")),
-        r("get_tcg_decks", "公開デッキ", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "index", "READ_POST", defaults = mapOf("page" to "1", "page_size" to "20")),
+        r("get_tcg_decks", "公開デッキ", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "index", "READ_POST", defaults = mapOf("next_page_token" to "", "keywords" to "", "label_id" to "1", "order" to "O_HOT", "role_card_id" to "[]", "page_size" to "20")),
         r("get_tcg_deck", "デッキ詳細", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "detail", required = setOf("id")),
-        r("get_tcg_deck_comments", "デッキコメント", "七聖召喚", ApiGame.GENSHIN, ApiScope.CARD_PLAZA, "detail", required = setOf("id")),
+        r("get_tcg_deck_comments", "デッキコメント", "七聖召喚", ApiGame.GENSHIN, ApiScope.BOULEUTERION, "account/reply/list", defaults = mapOf("app_id" to "10034", "game_biz" to "hk4e", "next" to "0", "mode" to "3"), required = setOf("entity_key")),
 
         r("teapot_replicas", "塵歌壺レプリカ", "塵歌壺", ApiGame.GENSHIN, ApiScope.TEAPOT, "list", defaults = mapOf("page" to "1", "page_size" to "20")),
         r("get_wiki_previews", "Wiki記事一覧", "Wiki", null, ApiScope.WIKI, "get_entry_page_list", "READ_POST", required = setOf("menu_id")),

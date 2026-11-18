@@ -30,9 +30,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.atuy.hoyodashboard.api.DailyNote
 import com.atuy.hoyodashboard.api.DashboardItem
-import com.atuy.hoyodashboard.api.Game
-
-private data class FeatureGroup(val title: String, val features: List<String>)
 
 @Composable
 internal fun GameDetailScreen(
@@ -40,7 +37,6 @@ internal fun GameDetailScreen(
     onBack: () -> Unit,
     onRefresh: () -> Unit
 ) {
-    val groups = remember(item.role.game) { featureGroups(item.role.game) }
     val note = item.note
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Row(
@@ -76,7 +72,7 @@ internal fun GameDetailScreen(
                     )
                 }
             }
-            groups.forEach { group -> FeatureGroupCard(group) }
+            UpstreamApiExplorer(item.role)
         }
     }
 }
@@ -125,92 +121,9 @@ private fun NoteOverview(note: DailyNote, resourceLabel: String) {
 }
 
 @Composable
-private fun FeatureGroupCard(group: FeatureGroup) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2230)),
-        shape = RoundedCornerShape(18.dp)
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(group.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            group.features.forEachIndexed { index, feature ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(feature, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        if (feature.startsWith("リアルタイムノート")) "表示中" else "API未移植",
-                        color = if (feature.startsWith("リアルタイムノート")) Color(0xFF88D5AA) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                }
-                if (index != group.features.lastIndex) {
-                    HorizontalDivider(color = Color(0xFF394252))
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun DetailValueRow(label: String, value: String) {
     Row(verticalAlignment = Alignment.Top) {
         Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
-}
-
-private fun featureGroups(game: Game): List<FeatureGroup> = when (game) {
-    Game.GENSHIN -> listOf(
-        FeatureGroup("リアルタイム", listOf("リアルタイムノート")),
-        FeatureGroup("プロフィール・キャラクター", listOf(
-            "プレイヤー情報・プロフィール", "キャラクター一覧", "キャラクター詳細・武器・聖遺物・天賦", "上位キャラクター設定"
-        )),
-        FeatureGroup("戦闘記録", listOf(
-            "深境螺旋", "幻想シアター", "追憶のエコー", "幽境の激戦", "活動履歴"
-        )),
-        FeatureGroup("イベント・七聖召喚", listOf(
-            "イベントカレンダー", "七聖召喚プレビュー・対戦記録", "カード・デッキ・カード効果・コメント"
-        )),
-        FeatureGroup("育成・攻略", listOf(
-            "キャラクター・武器・聖遺物の育成計算", "調度品計算", "チーム編成・編成履歴", "塵歌壺レプリカ", "Wiki"
-        )),
-        FeatureGroup("履歴", listOf(
-            "原石・モラ等の月次記録", "祈願履歴・バナー情報", "取引履歴"
-        )),
-        FeatureGroup("HoYoLAB", listOf(
-            "デイリー報酬・月間報酬", "コード交換", "お知らせ・Webイベント", "Mimoゲーム・タスク・ショップ・抽選",
-            "コンパニオンキャラクター", "投稿・コメント・トピック"
-        ))
-    )
-    Game.STAR_RAIL -> listOf(
-        FeatureGroup("リアルタイム", listOf("リアルタイムノート")),
-        FeatureGroup("プロフィール・キャラクター", listOf(
-            "プレイヤー情報・プロフィール", "キャラクター一覧・詳細", "編成シミュレータ・編成履歴"
-        )),
-        FeatureGroup("戦闘記録・模擬宇宙", listOf(
-            "忘却の庭", "虚構叙事", "末日の幻影", "模擬宇宙・階差宇宙", "異相演算"
-        )),
-        FeatureGroup("イベント・履歴", listOf(
-            "イベントカレンダー", "開拓紀行・月次記録", "ワープ履歴・星5統計", "取引履歴"
-        )),
-        FeatureGroup("HoYoLAB", listOf(
-            "デイリー報酬・月間報酬", "お知らせ・Webイベント", "Mimoゲーム・タスク・ショップ"
-        ))
-    )
-    Game.ZZZ -> listOf(
-        FeatureGroup("リアルタイム", listOf("リアルタイムノート", "日誌")),
-        FeatureGroup("プロフィール・エージェント", listOf(
-            "プレイヤー情報・プロフィール", "エージェント一覧・詳細", "ボンプ一覧", "エージェント育成ガイド"
-        )),
-        FeatureGroup("戦闘記録", listOf(
-            "式輿防衛", "危局強襲", "殲滅シミュレーション", "零号ホロウ：Lost Void", "閾値シミュレーション"
-        )),
-        FeatureGroup("イベント・履歴", listOf(
-            "イベントカレンダー", "ガチャカレンダー・提供情報", "変調履歴"
-        )),
-        FeatureGroup("HoYoLAB", listOf(
-            "デイリー報酬・月間報酬", "お知らせ・Webイベント", "Mimoゲーム・タスク・ショップ"
-        ))
-    )
 }

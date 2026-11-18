@@ -480,6 +480,21 @@ class ApiTransport(
         if (updated.isNotBlank() && updated != cookie) onCookieUpdate?.invoke(updated)
     }
 
+    private fun jsonForSignature(value: Any?): String = when (value) {
+        is JSONObject -> {
+            val keys = value.keys().asSequence().toList()
+            keys.joinToString(", ", "{", "}") { key ->
+                JSONObject.quote(key) + ": " + jsonForSignature(value.opt(key))
+            }
+        }
+        is JSONArray -> (0 until value.length()).joinToString(", ", "[", "]") {
+            jsonForSignature(value.opt(it))
+        }
+        null, JSONObject.NULL -> "null"
+        is String -> JSONObject.quote(value)
+        else -> value.toString()
+    }
+
     private fun dynamicSecret(
         region: ApiRegion,
         body: JSONObject?,
@@ -499,7 +514,7 @@ class ApiTransport(
             nonce = (100001 + random.nextInt(100000)).toString()
             val query = params.toSortedMap().entries.joinToString("&") { it.key + "=" + it.value }
             seed = "salt=" + salt + "&t=" + timestamp + "&r=" + nonce + "&b=" +
-                (body?.toString() ?: "") + "&q=" + query
+                (body?.let(::jsonForSignature) ?: "") + "&q=" + query
         }
         val hash = MessageDigest.getInstance("MD5").digest(seed.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 255) }

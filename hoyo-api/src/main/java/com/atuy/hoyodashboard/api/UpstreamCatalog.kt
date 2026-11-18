@@ -8,6 +8,8 @@ enum class ApiGame {
             Game.GENSHIN -> GENSHIN
             Game.STAR_RAIL -> STARRAIL
             Game.ZZZ -> ZZZ
+            Game.HONKAI -> HONKAI
+            Game.TOT -> TOT
         }
     }
 }

@@ -18,7 +18,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,7 +34,6 @@ import com.atuy.hoyodashboard.api.Role
 import com.atuy.hoyodashboard.api.UpstreamCatalog
 import com.atuy.hoyodashboard.api.UpstreamApiClient
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -55,13 +53,14 @@ internal fun UpstreamApiExplorer(role: Role) {
     val categories = remember(methods) { methods.groupBy { it.category } }
     val coroutineScope = rememberCoroutineScope()
     val permits = remember { Semaphore(2) }
-    var states by remember(role.uid) { mutableStateOf<Map<String, LoadState>>(emptyMap()) }
+    var states by remember(role) { mutableStateOf<Map<String, LoadState>>(emptyMap()) }
     var openedCategory by remember { mutableStateOf<String?>(null) }
     var selectedResult by remember { mutableStateOf<String?>(null) }
     var parameterMethod by remember { mutableStateOf<ApiMethod?>(null) }
     var parameterText by remember { mutableStateOf("") }
 
     suspend fun fetch(method: ApiMethod, arguments: Map<String, String> = emptyMap()) {
+        if (states[method.name] is LoadState.Fetching) return
         val cookie = SecureCookieStore.read(context)
         if (cookie.isNullOrBlank()) {
             states = states + (method.name to LoadState.Failed("HoYoLABにログインしてください"))
@@ -77,19 +76,6 @@ internal fun UpstreamApiExplorer(role: Role) {
             throw e
         } catch (e: Exception) {
             states = states + (method.name to LoadState.Failed(e.message ?: "取得失敗"))
-        }
-    }
-
-    LaunchedEffect(role.uid, role.game) {
-        val automatic = methods.filter {
-            it.readOnly && it.required.isEmpty() && !it.authKeyRequired &&
-                it.name !in setOf("get_genshin_notes", "get_starrail_notes", "get_zzz_notes")
-        }
-        automatic.forEach { method ->
-            launch {
-                fetch(method)
-                delay(120)
-            }
         }
     }
 
@@ -132,12 +118,16 @@ internal fun UpstreamApiExplorer(role: Role) {
                             Column(
                                 Modifier.fillMaxWidth()
                                     .clickable {
-                                        when {
-                                            method.authKeyRequired || method.required.isNotEmpty() -> {
-                                                parameterMethod = method
-                                                parameterText = ""
+                                        when (status) {
+                                            is LoadState.Ready -> selectedResult = method.name
+                                            LoadState.Fetching -> Unit
+                                            else -> when {
+                                                method.authKeyRequired || method.required.isNotEmpty() -> {
+                                                    parameterMethod = method
+                                                    parameterText = ""
+                                                }
+                                                else -> coroutineScope.launch { fetch(method) }
                                             }
-                                            else -> coroutineScope.launch { fetch(method) }
                                         }
                                     }
                                     .padding(horizontal = 16.dp, vertical = 12.dp)

@@ -6,6 +6,13 @@ import java.util.UUID
 import java.security.MessageDigest
 import java.security.SecureRandom
 
+data class UpstreamActionDefinition(
+    val name: String,
+    val title: String,
+    val required: List<String>,
+    val confirmationRequired: Boolean = false
+)
+
 class UpstreamActions(
     private val language: String = "ja-jp",
     private val transport: ApiTransport = ApiTransport()

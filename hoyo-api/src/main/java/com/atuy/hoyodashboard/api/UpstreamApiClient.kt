@@ -587,6 +587,7 @@ class UpstreamApiClient(
         arguments: Map<String, String>
     ): JSONObject {
         val params = method.defaults + arguments
+        require(!params["entity_key"].isNullOrBlank()) { "entity_key is required" }
         var cursor = params["next"] ?: "0"
         val rows = JSONArray()
         repeat(100) {
@@ -717,7 +718,8 @@ class UpstreamApiClient(
             ).takeWhile { page ->
                 val rows = page.optJSONArray("list") ?: JSONArray()
                 for (i in 0 until rows.length()) {
-                    rows.optJSONObject(i)?.let(records::add)
+                    val item = rows.optJSONObject(i) ?: continue
+                    records.add(JSONObject(item.toString()).put("gacha_type", bannerType))
                 }
                 requestedLimit == null || records.size < requestedLimit
             }.collect { }

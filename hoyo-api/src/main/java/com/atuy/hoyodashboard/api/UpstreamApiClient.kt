@@ -242,6 +242,10 @@ class UpstreamApiClient(
             params["uid"] = account.uid
             params["region"] = account.server
         }
+        if (method.name == "get_starrail_lineups") {
+            params["lineup_type"] = params.remove("type").orEmpty()
+            params["game"] = "hkrpg"
+        }
         if (method.name == "get_web_events") {
             val gameId = when (account.game) {
                 ApiGame.HONKAI -> 1
@@ -554,15 +558,18 @@ class UpstreamApiClient(
     ): JSONObject {
         val paginator = UpstreamPaginator(this)
         val result = JSONArray()
-        val cursorParameter = if (method.name in setOf(
-            "claimed_rewards", "genshin_diary_log", "starrail_diary_log", "get_zzz_diary_detail"
-        )) "current_page" else "page"
+        val cursorParameter = when (method.name) {
+            "claimed_rewards", "genshin_diary_log", "starrail_diary_log", "get_zzz_diary_detail" -> "current_page"
+            "get_lineups", "get_starrail_lineups" -> "next_page_token"
+            else -> "page"
+        }
         paginator.pages(
             cookie, account, method, arguments,
             PageSpec(
                 cursorParameter = cursorParameter,
+                cursorField = if (cursorParameter == "next_page_token") "next_page_token" else "next_end_id",
                 itemsField = "list",
-                pageSize = pageSize,
+                pageSize = if (cursorParameter == "next_page_token") null else pageSize,
                 maxPages = 100,
                 pauseMilliseconds = 300
             )

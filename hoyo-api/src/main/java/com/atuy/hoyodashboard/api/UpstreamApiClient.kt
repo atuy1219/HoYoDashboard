@@ -58,6 +58,21 @@ class UpstreamApiClient(
         arguments: Map<String, String> = emptyMap()
     ): JSONObject {
         require(method.readOnly) { "Write operations require a separate explicit API." }
+        if (account.region == ApiRegion.CHINESE && (
+            method.scope == ApiScope.MIMO ||
+                method.name in setOf(
+                    "get_web_events",
+                    "get_accompany_characters",
+                    "get_accompany_character_details",
+                    "get_accompany_character_posts",
+                    "get_accompany_voice_setting"
+                )
+            )
+        ) {
+            throw UnsupportedOperationException(
+                method.name + " is only available for overseas HoYoLAB accounts."
+            )
+        }
         require(method.game == null || method.game == account.game) {
             "Endpoint not supported for " + account.game
         }

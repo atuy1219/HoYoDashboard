@@ -45,7 +45,7 @@ class UpstreamActions(
                 "update_settings" -> account.game != ApiGame.TOT
                 "set_top_genshin_characters" -> account.game == ApiGame.GENSHIN
                 "finish_mimo_task", "claim_mimo_task_reward", "buy_mimo_shop_item", "draw_mimo_lottery",
-                "accompany_character", "browse_accompany_post" ->
+                "accompany_character", "browse_accompany_post", "set_accompany_voice_setting" ->
                     account.region == ApiRegion.OVERSEAS
                 else -> true
             }

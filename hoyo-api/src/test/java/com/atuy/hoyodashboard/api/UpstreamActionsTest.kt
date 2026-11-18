@@ -60,6 +60,13 @@ class UpstreamActionsTest {
     }
 
     @Test
+    fun hidesGlobalOnlyVoiceActionForChinaAccounts() {
+        val account = ApiAccount(ApiGame.GENSHIN, "100000001", "cn_gf01", ApiRegion.CHINESE)
+        val names = actions.availableActions(account).map { it.name }
+        assertFalse("set_accompany_voice_setting" in names)
+    }
+
+    @Test
     fun rejectsUnsupportedActionBeforeMakingRequest() = runBlocking {
         val account = ApiAccount(ApiGame.TOT, "100000001", "nxx_os_usa")
         try {

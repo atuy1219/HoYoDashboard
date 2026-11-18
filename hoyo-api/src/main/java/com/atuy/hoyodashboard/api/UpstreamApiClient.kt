@@ -84,6 +84,30 @@ class UpstreamApiClient(
                 arguments + ("character_ids" to ids.toString())
             )
         }
+        if (method.name == "get_zzz_agent_info" && arguments["id_list[]"].isNullOrBlank()) {
+            val agents = call(cookie, account, "get_zzz_agents")
+            val rows = agents.optJSONArray("avatar_list") ?: agents.optJSONArray("list") ?: JSONArray()
+            val details = JSONArray()
+            for (i in 0 until rows.length()) {
+                val id = rows.optJSONObject(i)?.optInt("id", 0) ?: 0
+                if (id <= 0) continue
+                val result = call(
+                    cookie, account, method.copy(name = "get_zzz_agent_info_raw"),
+                    arguments + ("id_list[]" to id.toString())
+                )
+                details.put(result.optJSONArray("avatar_list")?.optJSONObject(0) ?: result)
+            }
+            return JSONObject().put("avatar_list", details)
+        }
+        if (method.name == "get_threshold_simulation" && arguments["void_front_id"].isNullOrBlank()) {
+            val brief = call(cookie, account, "get_threshold_simulation_brief")
+            val id = brief.optString("id").ifBlank { brief.optString("void_front_id") }
+            if (id.isBlank()) return brief
+            return call(
+                cookie, account, method.copy(name = "get_threshold_simulation_raw"),
+                arguments + ("void_front_id" to id)
+            )
+        }
         val params = method.defaults.mapValues { (_, value) ->
             value.replace("{uid}", account.uid).replace("{server}", account.server)
         }.toMutableMap()

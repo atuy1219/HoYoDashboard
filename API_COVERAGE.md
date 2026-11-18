@@ -4,7 +4,7 @@
 
 - [x] 117 mapped read-only upstream operations across Genshin Impact, Honkai: Star Rail, Zenless Zone Zero, Honkai Impact 3rd, and shared HoYoLAB APIs
 - [x] Native HTTPS request transport with official-host validation
-- [x] Overseas and mainland-China routing where the upstream API exposes a route
+- [x] Overseas and mainland-China routing where the upstream API exposes a route, with explicit guards for global-only Mimo and companion endpoints
 - [x] Cookie storage encrypted with Android Keystore AES-GCM
 - [x] WebView login for HoYoLAB and 米游社
 - [x] Cookie refresh for supported global and mainland legacy/v2 sessions
@@ -14,10 +14,10 @@
 - [x] Aggregation of all Genshin, Star Rail, and ZZZ gacha pools before applying history limits
 - [x] Aggregation of all Genshin transaction categories before applying history limits
 - [x] Typed core models for profiles, character previews, gacha records, diary summaries, rewards, and transaction rows
-- [x] Dedicated tabs for account overview, characters and build data, battle records, gacha history, and monthly records
+- [x] Dedicated tabs for account overview, characters and build data, all supported battle modes, gacha history with per-banner pity summaries, and monthly records
 - [x] UI for daily check-in, code redemption, and the currently implemented account write operations
 - [x] Confirmation gates for destructive or value-consuming account actions
-- [x] Unit tests for catalog coverage, pagination merge ordering, nested diary parsing, and account-scoped write actions
+- [x] Unit tests for catalog coverage, pagination merge ordering, nested diary parsing, numeric featured flags, and account/region-scoped operations
 
 ## Remaining compatibility work
 

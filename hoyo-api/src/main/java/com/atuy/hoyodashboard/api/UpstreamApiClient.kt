@@ -153,10 +153,36 @@ class UpstreamApiClient(
                 arguments + ("void_front_id" to id)
             )
         }
+        if (method.name == "get_mimo_point_count") {
+            val data = call(cookie, account, "get_mimo_games")
+            val rows = data.optJSONArray("list") ?: data.optJSONArray("act_list") ?: JSONArray()
+            val targetId = when (account.game) {
+                ApiGame.GENSHIN -> 2
+                ApiGame.STARRAIL -> 6
+                ApiGame.ZZZ -> 8
+                ApiGame.HONKAI -> -1
+                ApiGame.TOT -> -1
+            }
+            val item = (0 until rows.length()).asSequence().mapNotNull { index ->
+                val row = rows.optJSONObject(index) ?: return@mapNotNull null
+                row.optJSONObject("act_info") ?: row
+            }.firstOrNull { it.optInt("game_id", it.optInt("id")) == targetId }
+                ?: throw HoYoApiException("No Mimo point account for " + account.game)
+            return JSONObject().put("point", item.optInt("point"))
+        }
         val params = method.defaults.mapValues { (_, value) ->
             value.replace("{uid}", account.uid).replace("{server}", account.server)
         }.toMutableMap()
         params.putAll(arguments)
+        if (method.name == "get_record_cards" && params["uid"].isNullOrBlank()) {
+            val cookieValues = cookie.split(';').mapNotNull { part ->
+                val index = part.indexOf('=')
+                if (index <= 0) null else part.substring(0, index).trim() to part.substring(index + 1).trim()
+            }.toMap()
+            params["uid"] = cookieValues["ltuid_v2"] ?: cookieValues["ltuid"]
+                ?: cookieValues["account_id_v2"] ?: cookieValues["account_id"]
+                ?: throw IllegalArgumentException("HoYoLAB account ID is missing from cookies.")
+        }
         val missing = method.required.filter { key ->
             params[key].isNullOrBlank() || params[key]!!.startsWith("{")
         }

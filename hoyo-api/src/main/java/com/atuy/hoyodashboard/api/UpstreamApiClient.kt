@@ -269,18 +269,7 @@ class ApiTransport {
         headers: Map<String, String> = emptyMap()
     ): JSONObject = withContext(Dispatchers.IO) {
         require(verb == "GET" || verb == "POST")
-        require(!endpoint.startsWith("http") && !endpoint.contains(".."))
-        val uri = URI(base)
-        val host = uri.host ?: throw IllegalArgumentException("Missing API host")
-        require(uri.scheme == "https" && listOf(
-            "hoyolab.com", "hoyoverse.com", "mihoyo.com", "miyoushe.com"
-        ).any { host == it || host.endsWith("." + it) }) { "Unsafe API host" }
-        val path = uri.rawPath.orEmpty().trimEnd('/') + "/" + endpoint.trimStart('/')
-        val query = buildList {
-            uri.rawQuery?.takeIf { it.isNotBlank() }?.let { add(it) }
-            for ((key, value) in params) add(encode(key) + "=" + encode(value))
-        }.joinToString("&")
-        val url = URL(uri.scheme + "://" + host + path + if (query.isEmpty()) "" else "?" + query)
+        val url = ApiUrlComposer.compose(base, endpoint, params)
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = verb
             connectTimeout = 15000

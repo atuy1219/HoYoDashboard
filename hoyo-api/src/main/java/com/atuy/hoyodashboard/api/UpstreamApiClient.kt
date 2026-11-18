@@ -453,6 +453,22 @@ class UpstreamApiClient(
         }
     }
 
+    private fun gachaTimezoneOffset(account: ApiAccount, page: JSONObject): Int = when (account.game) {
+        ApiGame.GENSHIN -> when (account.server) {
+            "os_usa" -> -13
+            "os_euro" -> -7
+            else -> 0
+        }
+        ApiGame.STARRAIL -> page.optInt("region_time_zone", 8) - 8
+        ApiGame.ZZZ -> when (account.server) {
+            "prod_gf_us" -> -13
+            "prod_gf_eu" -> -7
+            "prod_gf_jp" -> 1
+            else -> 0
+        }
+        ApiGame.HONKAI, ApiGame.TOT -> 0
+    }
+
     private fun simpleDynamicSecret(salt: String): String {
         val timestamp = System.currentTimeMillis() / 1000
         val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -717,9 +733,14 @@ class UpstreamApiClient(
                 )
             ).takeWhile { page ->
                 val rows = page.optJSONArray("list") ?: JSONArray()
+                val timezoneOffset = gachaTimezoneOffset(account, page)
                 for (i in 0 until rows.length()) {
                     val item = rows.optJSONObject(i) ?: continue
-                    records.add(JSONObject(item.toString()).put("gacha_type", bannerType))
+                    records.add(
+                        JSONObject(item.toString())
+                            .put("gacha_type", bannerType)
+                            .put("tz_offset", timezoneOffset)
+                    )
                 }
                 requestedLimit == null || records.size < requestedLimit
             }.collect { }

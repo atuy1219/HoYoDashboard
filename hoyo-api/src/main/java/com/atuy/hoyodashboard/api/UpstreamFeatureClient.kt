@@ -21,6 +21,9 @@ class UpstreamFeatureClient(
         arguments: Map<String, String> = emptyMap()
     ): JSONObject = api.call(cookieProvider(), account, method, arguments)
 
+    suspend fun fetchAuthKey(purpose: AuthKeyPurpose = AuthKeyPurpose.GACHA, uid: String? = null): String =
+        api.fetchAuthKey(cookieProvider(), account, purpose, uid)
+
     suspend fun checkInStatus(): CheckInStatus = rewardStatus().let {
         CheckInStatus(it.optBoolean("is_sign"), it.optInt("total_sign_day"))
     }

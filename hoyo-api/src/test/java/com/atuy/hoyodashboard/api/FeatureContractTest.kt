@@ -17,6 +17,48 @@ class FeatureContractTest {
     private val zzz = ApiAccount(ApiGame.ZZZ, "1300000010", "prod_gf_jp")
 
     @Test
+    fun localizationDictionaryUsesLocaleAndSendsNoCredentials() = runBlocking {
+        val api = UpstreamApiClient(transport = transport(
+            envelope = { it },
+            request = { assertEquals(null, it.getRequestProperty("Cookie")) }
+        ) { url, _ ->
+            assertEquals("/client/strings/strings-ja-jp.json", url.path)
+            JSONObject().put("material", "素材")
+        })
+        assertEquals(mapOf("material" to "素材"),
+            api.fetchMi18n(genshin, "https://act.hoyolab.com/client", "strings"))
+    }
+
+    @Test
+    fun fetchAuthKeyUsesRequestedUidAndPurpose() = runBlocking {
+        val api = fixture { url, body ->
+            assertEquals("/binding/api/genAuthKeyByCookieToken", url.path)
+            assertEquals("600000123", body.getString("game_uid"))
+            assertEquals("os_usa", body.getString("region"))
+            assertEquals("csc", body.getString("auth_appid"))
+            JSONObject().put("authkey", "mock%2Bkey%3D")
+        }
+        val cookie = "cookie_token_v2=test; account_id_v2=42; account_mid_v2=mid"
+        assertEquals("mock+key=", api.fetchAuthKey(cookie, genshin, AuthKeyPurpose.TRANSACTIONS, "600000123"))
+        assertEquals(-5, genshin.withUid("600000123").accountTimezone())
+        assertEquals(null, genshin.copy(server = "unknown").accountTimezone())
+    }
+
+    @Test
+    fun redemptionUsesRequestedAccountAndKeepsChineseLocale() = runBlocking {
+        val actions = UpstreamActions(transport = transport { url, body ->
+            assertEquals("/common/apicdkey/api/webExchangeCdkeyRisk", url.path)
+            assertEquals(700000123L, body.opt("uid")?.let { (it as Number).toLong() })
+            assertEquals("prod_official_eur", body.getString("region"))
+            assertEquals("zh-tw", body.getString("lang"))
+            JSONObject()
+        })
+        actions.execute("cookie_token_v2=test", hsr, "redeem_code",
+            mapOf("code" to "TESTCODE", "uid" to "700000123", "lang" to "zh-tw"))
+        Unit
+    }
+
+    @Test
     fun calculatorListsFollowPagesWithNumericPayloadAndLanguage() = runBlocking {
         val calls = mutableListOf<Int>()
         val api = fixture { _, body ->

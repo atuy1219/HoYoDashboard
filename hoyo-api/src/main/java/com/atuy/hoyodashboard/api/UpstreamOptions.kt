@@ -42,11 +42,24 @@ internal fun ApiAccount.withUid(uid: String, serverOverride: String? = null): Ap
 }
 
 internal val ApiAccount.offsetHours: Int
-    get() = when (server) {
-        "os_usa", "prod_official_usa", "prod_gf_us" -> -5
-        "os_euro", "prod_official_eur", "prod_gf_eu" -> 1
-        else -> 8
-    }
+    get() = accountTimezone() ?: 8
+
+/** The UTC offset used by the game's server clock. */
+fun ApiAccount.accountTimezone(): Int? = when (server) {
+    "os_usa", "prod_official_usa", "prod_gf_us" -> -5
+    "os_euro", "prod_official_eur", "prod_gf_eu" -> 1
+    "cn_gf01", "cn_qd01", "os_asia", "os_cht", "prod_gf_cn", "prod_qd_cn",
+    "prod_official_asia", "prod_official_cht", "prod_gf_sg", "prod_gf_jp" -> 8
+    else -> null
+}
+
+internal fun apiLanguage(language: String): String {
+    require(language.matches(Regex("[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?"))) { "言語コードが無効です" }
+    return language
+}
+
+internal fun shortApiLanguage(language: String): String =
+    if ("zh" in language) language else language.substringBefore('-')
 
 internal fun intList(value: String): List<Int> =
     if (value.trim().startsWith("[")) {

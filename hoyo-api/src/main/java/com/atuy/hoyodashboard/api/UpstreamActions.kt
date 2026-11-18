@@ -63,7 +63,11 @@ class UpstreamActions(
         arguments: Map<String, String>
     ): JSONObject {
         if (name == "check_in_community") throw UnsupportedOperationException("HoYoLABコミュニティのチェックインは終了しました")
-        val operation = if (name == "browse_accompany_character_post") "browse_accompany_post" else name
+        val operation = when (name) {
+            "browse_accompany_character_post" -> "browse_accompany_post"
+            "set_visibility" -> "update_settings"
+            else -> name
+        }
         fun required(key: String): String = arguments[key]?.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException(key + " is required")
         fun long(key: String): Long = required(key).toLongOrNull()
@@ -92,13 +96,22 @@ class UpstreamActions(
                 arguments.filterKeys { it in setOf("geetest_challenge", "geetest_validate", "geetest_seccode") }
             )
             "set_calculator_sync" -> setCalculatorSync(cookie, account, bool("public"))
-            "redeem_code" -> redeemCode(cookie, account, required("code"))
-            "update_settings" -> updateSettings(cookie, account, int("setting_id"), bool("public"))
-            "set_top_genshin_characters" -> setTopGenshinCharacters(
-                cookie, account,
-                required("character_ids").split(',').map { it.trim().toIntOrNull()
-                    ?: throw IllegalArgumentException("character_ids must be comma-separated integers") }
+            "redeem_code" -> redeemCode(
+                cookie, account, required("code"), arguments["uid"], arguments["region"], arguments["lang"]
             )
+            "update_settings" -> {
+                val setting = if (name == "set_visibility") 1 else {
+                    arguments["setting"]?.toIntOrNull() ?: int("setting_id")
+                }
+                updateSettings(cookie, account, setting, bool(if ("on" in arguments) "on" else "public"))
+            }
+            "set_top_genshin_characters" -> {
+                val selection = arguments["characters"] ?: required("character_ids")
+                val characters = runCatching { intList(selection) }.getOrElse {
+                    throw IllegalArgumentException("character_ids must be a list of integers", it)
+                }
+                setTopGenshinCharacters(cookie, arguments["uid"]?.let { account.withUid(it) } ?: account, characters)
+            }
             "finish_mimo_task" -> finishMimoTask(cookie, account, long("task_id"), mimoId("game_id"), mimoId("version_id"))
             "claim_mimo_task_reward" -> claimMimoTaskReward(cookie, account, long("task_id"), mimoId("game_id"), mimoId("version_id"))
             "buy_mimo_shop_item" -> buyMimoShopItem(cookie, account, long("item_id"), mimoId("game_id"), mimoId("version_id"))
@@ -176,8 +189,21 @@ class UpstreamActions(
         cookie: String,
         account: ApiAccount,
         code: String
+    ): JSONObject = redeemCode(cookie, account, code, null)
+
+    suspend fun redeemCode(
+        cookie: String,
+        defaultAccount: ApiAccount,
+        code: String,
+        uid: String?,
+        region: String? = null,
+        lang: String? = null
     ): JSONObject {
         require(code.isNotBlank())
+        val account = if (uid != null || region != null) {
+            defaultAccount.withUid(uid ?: defaultAccount.uid, region)
+        } else defaultAccount
+        val locale = apiLanguage(lang ?: language)
         val origin = when (account.game) {
             ApiGame.GENSHIN -> "https://genshin.hoyoverse.com"
             ApiGame.STARRAIL -> "https://hsr.hoyoverse.com"
@@ -202,13 +228,13 @@ class UpstreamActions(
         }
         val args = mapOf(
             "uid" to account.uid, "region" to account.server, "cdkey" to code,
-            "game_biz" to gameBiz, "lang" to language.substringBefore('-')
+            "game_biz" to gameBiz, "lang" to shortApiLanguage(locale)
         )
         val post = account.game in setOf(ApiGame.STARRAIL, ApiGame.ZZZ)
         val json = if (post) JSONObject(args).put("device_uuid", UUID.randomUUID().toString())
-            .put("platform", "4").put("t", System.currentTimeMillis() / 1000) else null
+            .put("uid", account.uid.toLong()).put("platform", "4").put("t", System.currentTimeMillis() / 1000) else null
         return transport.send(
-            target, "", cookie, account.region, language,
+            target, "", cookie, account.region, locale,
             if (post) "POST" else "GET",
             if (post) emptyMap() else args,
             json,
@@ -268,7 +294,7 @@ class UpstreamActions(
         return transport.send(
             url, "character/top", cookie, account.region, language, "POST", emptyMap(),
             JSONObject().put("avatar_ids", JSONArray(characterIds))
-                .put("uid_key", account.uid).put("server_key", account.server),
+                .put("uid_key", account.uid.toLong()).put("server_key", account.server),
             rpcHeaders = true, signed = true
         )
     }

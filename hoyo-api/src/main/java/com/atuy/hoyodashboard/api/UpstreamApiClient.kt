@@ -30,6 +30,10 @@ data class ApiAccount(
     }
 }
 
+enum class AuthKeyPurpose(internal val appId: String) {
+    GACHA("webview_gacha"), TRANSACTIONS("csc")
+}
+
 class UpstreamApiClient(
     private val language: String = "ja-jp",
     private val onCookieUpdate: ((String) -> Unit)? = null,
@@ -39,6 +43,36 @@ class UpstreamApiClient(
 ) {
     private val authKeyMutex = Mutex()
     private val authKeyCache = mutableMapOf<String, Pair<Long, String>>()
+
+    suspend fun fetchAuthKey(
+        cookie: String,
+        account: ApiAccount,
+        purpose: AuthKeyPurpose = AuthKeyPurpose.GACHA,
+        uid: String? = null
+    ): String {
+        require(account.game in setOf(ApiGame.GENSHIN, ApiGame.STARRAIL, ApiGame.ZZZ)) {
+            "このゲームでは履歴取得キーを発行できません"
+        }
+        val selected = uid?.let { account.withUid(it) } ?: account
+        return decodeHistoryAuthKey(generateAuthKey(cookie, selected, purpose.appId))
+    }
+
+    suspend fun fetchMi18n(
+        account: ApiAccount,
+        baseUrl: String,
+        filename: String,
+        lang: String = language
+    ): Map<String, String> {
+        require(account.region == ApiRegion.OVERSEAS) { "海外版アカウントで利用できます" }
+        require(filename.matches(Regex("[A-Za-z0-9_-]+"))) { "翻訳ファイル名が無効です" }
+        val locale = apiLanguage(lang)
+        val translations = transport.exchange(
+            baseUrl, "$filename/$filename-$locale.json", "", account.region, locale, "GET", emptyMap(), null
+        ).payload
+        return translations.keys().asSequence().mapNotNull { key ->
+            (translations.opt(key) as? String)?.let { key to it }
+        }.toMap()
+    }
 
     fun available(game: ApiGame): List<ApiMethod> =
         UpstreamCatalog.methods.filter { it.game == null || it.game == game }
@@ -114,8 +148,7 @@ class UpstreamApiClient(
         val explicitServer = options["server"]
         val account = if (selectors && inputUid != null) originalAccount.withUid(inputUid, explicitServer)
             else originalAccount
-        val requestLanguage = options["lang"] ?: language
-        require(requestLanguage.matches(Regex("[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?"))) { "言語コードが無効です" }
+        val requestLanguage = apiLanguage(options["lang"] ?: language)
         val autoAuth = options["autoauth"] == "true"
         val rawResponse = options["raw"] == "true" || options["return_raw_data"] == "true"
         val arguments = options - setOf("sync", "autoauth", "raw", "return_raw_data", "use_cache") -
@@ -354,13 +387,16 @@ class UpstreamApiClient(
                 (agents.optJSONArray("avatar_list") ?: agents.optJSONArray("list")).objects()
                     .mapNotNull { it.optInt("id").takeIf { id -> id > 0 } }
             }
-            val details = JSONArray()
-            for (id in ids) {
-                val result = call(cookie, account, method.copy(name = "get_zzz_agent_info_raw"),
-                    locale + ("id_list[]" to id.toString()))
-                (result.optJSONArray("avatar_list")?.optJSONObject(0) ?: result).let { details.put(it) }
+            val details = coroutineScope {
+                ids.map { id ->
+                    async {
+                        val result = call(cookie, account, method.copy(name = "get_zzz_agent_info_raw"),
+                            locale + ("id_list[]" to id.toString()))
+                        result.optJSONArray("avatar_list")?.optJSONObject(0) ?: result
+                    }
+                }.map { it.await() }
             }
-            return JSONObject().put("avatar_list", details)
+            return JSONObject().put("avatar_list", JSONArray(details))
         }
         if (method.name == "get_threshold_simulation" && arguments["void_front_id"].isNullOrBlank()) {
             val response = call(cookie, account, "get_threshold_simulation_brief", arguments)
@@ -533,8 +569,7 @@ class UpstreamApiClient(
         if (method.scope == ApiScope.GACHA) {
             params["authkey_ver"] = "1"
             params["authkey"] = decodeHistoryAuthKey(params["authkey"].orEmpty())
-            val lang = requestLanguage
-            params["lang"] = if (method.endpoint == "getBeyondGachaLog" || lang.startsWith("zh-")) lang else lang.substringBefore('-')
+            params["lang"] = if (method.endpoint == "getBeyondGachaLog") requestLanguage else shortApiLanguage(requestLanguage)
             params["game_biz"] = gameBiz(account)
             if (method.endpoint in setOf("getGachaLog", "getBeyondGachaLog", "getLdGachaLog")) {
                 params.putIfAbsent("size", "20")
@@ -546,8 +581,7 @@ class UpstreamApiClient(
             params["authkey_ver"] = "1"
             params["sign_type"] = "2"
             params["authkey"] = decodeHistoryAuthKey(params["authkey"].orEmpty())
-            val lang = requestLanguage
-            params["lang"] = if (lang.startsWith("zh-")) lang else lang.substringBefore('-')
+            params["lang"] = shortApiLanguage(requestLanguage)
             params.putIfAbsent("size", "20")
             params.putIfAbsent("end_id", "0")
         }

@@ -139,7 +139,7 @@ class UpstreamApiClient(
             "claimed_rewards" to 10,
             "genshin_diary_log" to 100,
             "starrail_diary_log" to 100,
-            "get_zzz_diary_detail" to 100,
+            "get_zzz_diary_detail" to 20,
             "get_lineups" to 20,
             "get_starrail_lineups" to 20,
             "get_tcg_decks" to 20,

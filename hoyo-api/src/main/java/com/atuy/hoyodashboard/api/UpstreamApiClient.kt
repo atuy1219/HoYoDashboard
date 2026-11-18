@@ -1,6 +1,10 @@
 package com.atuy.hoyodashboard.api
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -30,6 +34,9 @@ class UpstreamApiClient(
     private val badges: BadgeSession = BadgeSession(),
     private val sessions: CookieSessionManager = CookieSessionManager(onCookieUpdate)
 ) {
+    private val authKeyMutex = Mutex()
+    private val authKeyCache = mutableMapOf<String, Pair<Long, String>>()
+
     fun available(game: ApiGame): List<ApiMethod> =
         UpstreamCatalog.methods.filter { it.game == null || it.game == game }
 
@@ -56,6 +63,11 @@ class UpstreamApiClient(
         }
         if (method.scope == ApiScope.ANNOUNCEMENT) {
             return announcements(cookie, account, method)
+        }
+        if (method.name in setOf("wish_history", "mw_wish_history", "warp_history", "signal_history") &&
+            arguments["gacha_type"].isNullOrBlank()
+        ) {
+            return allGachaHistory(cookie, account, method, arguments)
         }
         if (method.name == "get_full_genshin_user") {
             val user = call(cookie, account, "get_genshin_user")
@@ -260,7 +272,7 @@ class UpstreamApiClient(
         if (method.scope == ApiScope.GACHA) {
             params["authkey_ver"] = "1"
             params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty().replace("+", "%2B"), "UTF-8")
-            params["lang"] = language.substringBefore('-')
+            params["lang"] = if (method.name == "mw_wish_history") language else language.substringBefore('-')
             params["game_biz"] = gameBiz(account)
             params.putIfAbsent("size", "20")
             params.putIfAbsent("page", "1")
@@ -485,25 +497,86 @@ class UpstreamApiClient(
         require(account.region == ApiRegion.OVERSEAS) {
             "genshin.py only supports authkey generation for overseas accounts."
         }
-        val activeCookie = sessions.ensureGachaCookie(cookie, account.region)
-        val body = JSONObject()
-            .put("game_uid", account.uid)
-            .put("region", account.server)
-            .put("game_biz", gameBiz(account))
-            .put("auth_appid", authAppId)
-        val result = transport.send(
-            "https://api-account-os.hoyoverse.com/binding/api",
-            "genAuthKeyByCookieToken",
-            activeCookie,
-            account.region,
-            language,
-            "POST",
-            emptyMap(),
-            body
-        )
-        val key = result.optString("authkey")
-        if (key.isBlank()) throw HoYoApiException("Authkey was not returned by HoYoverse.")
-        return key
+        val cookieHash = MessageDigest.getInstance("SHA-256")
+            .digest(cookie.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        val cacheKey = account.game.name + ":" + account.uid + ":" + authAppId + ":" + cookieHash
+        val now = System.currentTimeMillis()
+        return authKeyMutex.withLock {
+            authKeyCache[cacheKey]?.takeIf { it.first > now }?.second ?: run {
+                val activeCookie = sessions.ensureGachaCookie(cookie, account.region)
+                val body = JSONObject()
+                    .put("game_uid", account.uid)
+                    .put("region", account.server)
+                    .put("game_biz", gameBiz(account))
+                    .put("auth_appid", authAppId)
+                val result = transport.send(
+                    "https://api-account-os.hoyoverse.com/binding/api",
+                    "genAuthKeyByCookieToken",
+                    activeCookie,
+                    account.region,
+                    language,
+                    "POST",
+                    emptyMap(),
+                    body
+                )
+                val key = result.optString("authkey")
+                if (key.isBlank()) throw HoYoApiException("Authkey was not returned by HoYoverse.")
+                authKeyCache[cacheKey] = (now + 8L * 60 * 1000) to key
+                key
+            }
+        }
+    }
+
+    private suspend fun allGachaHistory(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod,
+        arguments: Map<String, String>
+    ): JSONObject {
+        val (types, pageSize) = when (method.name) {
+            "wish_history" -> listOf(100, 200, 301, 302, 400, 500) to 20
+            "mw_wish_history" -> listOf(1000, 2000, 20011, 20012, 20021, 20022) to 5
+            "warp_history" -> listOf(1, 2, 11, 12, 21, 22) to 20
+            "signal_history" -> listOf(1, 2, 3, 5, 102, 103) to 20
+            else -> emptyList<Int>() to 20
+        }
+        val requestedLimit = arguments["limit"]?.toIntOrNull()?.takeIf { it > 0 }
+        val baseArgs = arguments - setOf("limit", "gacha_type", "end_id")
+        val pageMethod = method.copy(name = method.name + "_page", required = setOf("gacha_type"))
+        val records = mutableListOf<JSONObject>()
+        val paginator = UpstreamPaginator(this)
+        for (bannerType in types) {
+            val pageArgs = baseArgs + mapOf(
+                "gacha_type" to bannerType.toString(),
+                "end_id" to "0",
+                "size" to pageSize.toString()
+            )
+            paginator.pages(
+                cookie,
+                account,
+                pageMethod,
+                pageArgs,
+                PageSpec(
+                    cursorParameter = "end_id",
+                    itemsField = "list",
+                    pageSize = pageSize,
+                    lastItemCursorField = "id",
+                    maxPages = 100,
+                    pauseMilliseconds = 350
+                )
+            ).takeWhile { page ->
+                val rows = page.optJSONArray("list") ?: JSONArray()
+                for (i in 0 until rows.length()) {
+                    rows.optJSONObject(i)?.let(records::add)
+                }
+                requestedLimit == null || records.size < requestedLimit
+            }.collect { }
+            if (requestedLimit != null && records.size >= requestedLimit) break
+        }
+        val sorted = records.sortedByDescending { it.optString("time") }
+            .let { if (requestedLimit == null) it else it.take(requestedLimit) }
+        return JSONObject().put("list", JSONArray(sorted))
     }
 
     private fun gameBiz(account: ApiAccount): String {

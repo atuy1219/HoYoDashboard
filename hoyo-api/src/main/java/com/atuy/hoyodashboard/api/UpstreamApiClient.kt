@@ -69,6 +69,9 @@ class UpstreamApiClient(
         ) {
             return allGachaHistory(cookie, account, method, arguments)
         }
+        if (method.name == "transaction_log" && arguments["kind"].isNullOrBlank()) {
+            return allTransactionHistory(cookie, account, method, arguments)
+        }
         if (method.name == "get_full_genshin_user") {
             val user = call(cookie, account, "get_genshin_user")
             val current = call(cookie, account, "get_genshin_spiral_abyss")
@@ -526,6 +529,42 @@ class UpstreamApiClient(
                 key
             }
         }
+    }
+
+    private suspend fun allTransactionHistory(
+        cookie: String,
+        account: ApiAccount,
+        method: ApiMethod,
+        arguments: Map<String, String>
+    ): JSONObject {
+        val kinds = listOf("primogem", "crystal", "resin", "artifact", "weapon")
+        val requestedLimit = arguments["limit"]?.toIntOrNull()?.takeIf { it > 0 }
+        val baseArgs = arguments - setOf("limit", "kind", "end_id")
+        val pageMethod = method.copy(name = "transaction_log_page", required = setOf("kind"))
+        val records = mutableListOf<JSONObject>()
+        val paginator = UpstreamPaginator(this)
+        for (kind in kinds) {
+            val pageArgs = baseArgs + mapOf("kind" to kind, "end_id" to "0", "size" to "20")
+            paginator.pages(
+                cookie, account, pageMethod, pageArgs,
+                PageSpec(
+                    cursorParameter = "end_id",
+                    itemsField = "list",
+                    pageSize = 20,
+                    lastItemCursorField = "id",
+                    maxPages = 100,
+                    pauseMilliseconds = 350
+                )
+            ).takeWhile { page ->
+                val rows = page.optJSONArray("list") ?: JSONArray()
+                for (i in 0 until rows.length()) rows.optJSONObject(i)?.let(records::add)
+                requestedLimit == null || records.size < requestedLimit
+            }.collect { }
+            if (requestedLimit != null && records.size >= requestedLimit) break
+        }
+        val sorted = records.sortedByDescending { it.optString("time") }
+            .let { if (requestedLimit == null) it else it.take(requestedLimit) }
+        return JSONObject().put("list", JSONArray(sorted))
     }
 
     private suspend fun allGachaHistory(

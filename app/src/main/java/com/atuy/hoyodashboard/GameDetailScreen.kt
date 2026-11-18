@@ -352,8 +352,19 @@ private fun GachaList(records: List<GachaRecord>) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             ValueRow("★5", fiveStars.toString())
             ValueRow("★4", fourStars.toString())
+            ValueRow("★5 UP", records.count { it.rarity >= 5 && it.isUp == true }.toString())
         }
         if (records.isEmpty()) Text("履歴がありません")
+        records.groupBy { it.bannerType }.toSortedMap().forEach { (bannerType, pool) ->
+            val newestFirst = pool.sortedByDescending { it.timestamp }
+            val pity = newestFirst.takeWhile { it.rarity < 5 }.size
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("祈願種別 " + bannerType, fontWeight = FontWeight.SemiBold)
+                ValueRow("現在の★5まで", pity.toString() + "回")
+                ValueRow("★5 / ★4", pool.count { it.rarity >= 5 }.toString() + " / " + pool.count { it.rarity == 4 })
+            }
+        }
+        HorizontalDivider(color = Color(0xFF394252))
         records.forEach { record ->
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -361,7 +372,8 @@ private fun GachaList(records: List<GachaRecord>) {
                     Text(if (record.rarity > 0) "★" + record.rarity else "—")
                 }
                 Text(
-                    record.time + " · " + record.bannerType,
+                    record.time + " · " + record.bannerType +
+                        (if (record.rarity >= 5 && record.isUp == true) " · UP" else ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

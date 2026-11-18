@@ -112,12 +112,30 @@ class HoYoClient(
         val note = when (role.game) {
             Game.GENSHIN -> {
                 val tasks = data.optJSONObject("daily_task")
-                val done = tasks?.int("completed_tasks")
-                    ?: data.int("finished_task_num", "completed_commissions")
-                val total = (tasks?.int("max_tasks")
-                    ?: data.int("total_task_num", "max_commissions")).takeIf { it > 0 } ?: 4
-                val claimed = data.optBoolean("is_extra_task_reward_received") ||
-                    data.optBoolean("claimed_commission_reward")
+                val done = tasks?.let { daily ->
+                    when {
+                        daily.has("finished_num") -> daily.optInt("finished_num")
+                        daily.has("completed_tasks") -> daily.optInt("completed_tasks")
+                        else -> null
+                    }
+                } ?: data.int("finished_task_num", "completed_commissions")
+                val total = (tasks?.let { daily ->
+                    when {
+                        daily.has("total_num") -> daily.optInt("total_num")
+                        daily.has("max_tasks") -> daily.optInt("max_tasks")
+                        else -> null
+                    }
+                } ?: data.int("total_task_num", "max_commissions")).takeIf { it > 0 } ?: 4
+                val claimed = tasks?.let { daily ->
+                    when {
+                        daily.has("is_extra_task_reward_received") ->
+                            daily.optBoolean("is_extra_task_reward_received")
+                        daily.has("claimed_commission_reward") ->
+                            daily.optBoolean("claimed_commission_reward")
+                        else -> null
+                    }
+                } ?: (data.optBoolean("is_extra_task_reward_received") ||
+                    data.optBoolean("claimed_commission_reward"))
                 DailyNote(
                     Progress(data.int("current_resin"), data.int("max_resin")),
                     data.long("resin_recovery_time", "remaining_resin_recovery_time"),

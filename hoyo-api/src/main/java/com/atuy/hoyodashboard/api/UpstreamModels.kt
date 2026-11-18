@@ -89,7 +89,7 @@ data class GachaRecord(
             val time = value.string("time")
             val timezoneOffset = value.int("tz_offset")
             val timestamp = runCatching {
-                java.time.LocalDateTime.parse(time)
+                java.time.LocalDateTime.parse(time.replace(" ", "T"))
                     .toInstant(java.time.ZoneOffset.ofHours(8 + timezoneOffset))
                     .toEpochMilli()
             }.getOrDefault(0L)

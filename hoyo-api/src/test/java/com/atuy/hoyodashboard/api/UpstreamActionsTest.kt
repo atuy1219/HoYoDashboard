@@ -60,6 +60,27 @@ class UpstreamActionsTest {
     }
 
     @Test
+    fun rejectsGlobalOnlyReadMethodsForChinaAccountsBeforeNetwork() = runBlocking {
+        val account = ApiAccount(ApiGame.GENSHIN, "100000001", "cn_gf01", ApiRegion.CHINESE)
+        val client = UpstreamApiClient()
+        for (name in listOf(
+            "get_mimo_games",
+            "get_mimo_point_count",
+            "get_web_events",
+            "get_accompany_characters",
+            "get_accompany_character_details",
+            "get_accompany_voice_setting"
+        )) {
+            try {
+                client.call("", account, name)
+                throw AssertionError("Expected " + name + " to be rejected")
+            } catch (error: UnsupportedOperationException) {
+                assertTrue(error.message.orEmpty().contains("overseas"))
+            }
+        }
+    }
+
+    @Test
     fun hidesGlobalOnlyVoiceActionForChinaAccounts() {
         val account = ApiAccount(ApiGame.GENSHIN, "100000001", "cn_gf01", ApiRegion.CHINESE)
         val names = actions.availableActions(account).map { it.name }

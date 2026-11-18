@@ -136,7 +136,7 @@ object UpstreamCatalog {
 
         r("get_lineup_fields", "編成シミュレーター設定", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "config"),
         r("get_lineup_scenarios", "編成シナリオ", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "tags"),
-        r("get_lineups", "編成一覧", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "lineup/index", defaults = mapOf("page" to "1", "page_size" to "20")),
+        r("get_lineups", "編成一覧", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "lineup/index", defaults = mapOf("next_page_token" to "", "limit" to "", "tag_id" to "", "order" to "Hot", "roles" to "")),
         r("get_lineup_details", "編成詳細", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "lineup/detail", required = setOf("id")),
         r("get_user_lineups", "マイ編成", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "user/lineup", defaults = mapOf("limit" to "100")),
         r("get_favorite_lineups", "お気に入り編成", "編成", ApiGame.GENSHIN, ApiScope.LINEUP, "user/favour_lineup", defaults = mapOf("limit" to "100")),
@@ -155,7 +155,7 @@ object UpstreamCatalog {
         r("get_wiki_pages", "複数Wiki記事", "Wiki", null, ApiScope.WIKI, "entry_pages", "READ_POST", required = setOf("entry_page_ids")),
 
         r("get_starrail_lineup_game_modes", "スタレ編成モード", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "tag"),
-        r("get_starrail_lineups", "スタレ編成一覧", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "lineup/index", defaults = mapOf("page" to "1", "page_size" to "20")),
+        r("get_starrail_lineups", "スタレ編成一覧", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "lineup/index", defaults = mapOf("next_page_token" to "", "order" to "Match", "game" to "hkrpg"), required = setOf("tag_id", "group_id", "type")),
         r("get_starrail_lineup_schedules", "忘却の庭・開催期間", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "schedule/challenge"),
         r("get_genshin_announcements", "原神のお知らせ", "お知らせ", ApiGame.GENSHIN, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),
         r("get_starrail_announcements", "スタレのお知らせ", "お知らせ", ApiGame.STARRAIL, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),

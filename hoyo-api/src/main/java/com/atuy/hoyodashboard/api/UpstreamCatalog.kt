@@ -168,8 +168,7 @@ object UpstreamCatalog {
         r("mw_wish_history", "幻想の星々の祈願履歴", "ガチャ", ApiGame.GENSHIN, ApiScope.GACHA, "getBeyondGachaLog", authKeyRequired = true),
         r("get_genshin_banner_names", "祈願バナー名一覧", "ガチャ", ApiGame.GENSHIN, ApiScope.GACHA, "getConfigList", authKeyRequired = true),
         r("get_genshin_banner_ids", "祈願バナーID一覧", "ガチャ", ApiGame.GENSHIN, ApiScope.WEBSTATIC, "gacha_info/hk4e/cn_gf01/gacha/list.json"),
-        r("get_banner_details", "祈願バナー詳細", "ガチャ", null, ApiScope.WEBSTATIC, "gacha_info/{game}/{server}/{banner_id}/{lang}.json", required = setOf("banner_id"))
-
+        r("get_banner_details", "祈願バナー詳細", "ガチャ", null, ApiScope.WEBSTATIC, "gacha_info/{game}/{server}/{banner_id}/{lang}.json", required = setOf("banner_id")),
         r("warp_history", "跳躍履歴", "ガチャ", ApiGame.STARRAIL, ApiScope.GACHA, "getGachaLog", authKeyRequired = true),
         r("signal_history", "変調履歴", "ガチャ", ApiGame.ZZZ, ApiScope.GACHA, "getGachaLog", authKeyRequired = true),
         r("transaction_log", "通貨取引明細", "取引履歴", ApiGame.GENSHIN, ApiScope.TRANSACTION, "GetActionLog", authKeyRequired = true),

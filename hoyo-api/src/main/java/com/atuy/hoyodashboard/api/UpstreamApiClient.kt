@@ -40,6 +40,25 @@ class UpstreamApiClient(
     fun available(game: ApiGame): List<ApiMethod> =
         UpstreamCatalog.methods.filter { it.game == null || it.game == game }
 
+    fun available(account: ApiAccount): List<ApiMethod> {
+        val globalOnlyNames = setOf(
+            "get_web_events",
+            "get_accompany_characters",
+            "get_accompany_character_details",
+            "get_accompany_character_posts",
+            "get_accompany_voice_setting"
+        )
+        return available(account.game).filterNot { method ->
+            account.region == ApiRegion.CHINESE && (
+                method.scope in setOf(
+                    ApiScope.MIMO, ApiScope.ANNOUNCEMENT, ApiScope.TEAPOT, ApiScope.ZZZ_LEDGER
+                ) ||
+                    method.name in globalOnlyNames ||
+                    (method.authKeyRequired && method.scope in setOf(ApiScope.GACHA, ApiScope.TRANSACTION))
+                )
+        }
+    }
+
     suspend fun call(
         cookie: String,
         account: ApiAccount,

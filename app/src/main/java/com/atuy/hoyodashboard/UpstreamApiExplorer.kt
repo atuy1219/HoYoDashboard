@@ -29,7 +29,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.atuy.hoyodashboard.api.ApiAccount
 import com.atuy.hoyodashboard.api.ApiMethod
-import com.atuy.hoyodashboard.api.ApiGame
 import com.atuy.hoyodashboard.api.Role
 import com.atuy.hoyodashboard.api.UpstreamCatalog
 import com.atuy.hoyodashboard.api.UpstreamApiClient
@@ -49,7 +48,7 @@ internal fun UpstreamApiExplorer(role: Role) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val client = remember { UpstreamApiClient(onCookieUpdate = { SecureCookieStore.save(context, it) }) }
     val account = remember(role) { ApiAccount.from(role) }
-    val methods = remember(role.game) { client.available(ApiGame.from(role.game)) }
+    val methods = remember(role) { client.available(ApiAccount.from(role)) }
     val categories = remember(methods) { methods.groupBy { it.category } }
     val coroutineScope = rememberCoroutineScope()
     val permits = remember { Semaphore(2) }

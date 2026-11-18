@@ -13,7 +13,7 @@ class UpstreamFeatureClient(
     constructor(api: UpstreamApiClient, cookie: String, account: ApiAccount) :
         this(api, { cookie }, account)
 
-    fun availableMethods(): List<ApiMethod> = api.available(account.game)
+    fun availableMethods(): List<ApiMethod> = api.available(account)
 
     suspend fun raw(
         method: String,

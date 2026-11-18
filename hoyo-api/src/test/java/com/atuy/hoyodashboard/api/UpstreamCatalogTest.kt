@@ -25,6 +25,24 @@ class UpstreamCatalogTest {
     }
 
     @Test
+    fun regionAvailabilityHidesUnsupportedMethods() {
+        val client = UpstreamApiClient()
+        val overseas = ApiAccount(ApiGame.GENSHIN, "800000001", "os_asia", ApiRegion.OVERSEAS)
+        val china = ApiAccount(ApiGame.GENSHIN, "100000001", "cn_gf01", ApiRegion.CHINESE)
+        val overseasNames = client.available(overseas).map { it.name }.toSet()
+        val chinaNames = client.available(china).map { it.name }.toSet()
+
+        assertTrue("get_mimo_games" in overseasNames)
+        assertTrue("get_web_events" in overseasNames)
+        assertTrue("transaction_log" in overseasNames)
+        assertFalse("get_mimo_games" in chinaNames)
+        assertFalse("get_web_events" in chinaNames)
+        assertFalse("get_accompany_character_details" in chinaNames)
+        assertFalse("transaction_log" in chinaNames)
+        assertTrue("get_genshin_diary" in chinaNames)
+    }
+
+    @Test
     fun uiEntriesRespectGameScope() {
         val genshin = UpstreamCatalog.forGame(Game.GENSHIN).map { it.name }
         assertTrue("get_genshin_notes" in genshin)

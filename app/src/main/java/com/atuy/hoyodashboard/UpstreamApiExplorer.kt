@@ -47,7 +47,7 @@ private sealed interface LoadState {
 @Composable
 internal fun UpstreamApiExplorer(role: Role) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val client = remember { UpstreamApiClient() }
+    val client = remember { UpstreamApiClient(onCookieUpdate = { SecureCookieStore.save(context, it) }) }
     val account = remember(role) { ApiAccount.from(role) }
     val methods = remember(role.game) { client.available(ApiGame.from(role.game)) }
     val categories = remember(methods) { methods.groupBy { it.category } }
@@ -122,7 +122,7 @@ internal fun UpstreamApiExplorer(role: Role) {
                                             is LoadState.Ready -> selectedResult = method.name
                                             LoadState.Fetching -> Unit
                                             else -> when {
-                                                method.authKeyRequired || method.required.isNotEmpty() -> {
+                                                method.required.isNotEmpty() -> {
                                                     parameterMethod = method
                                                     parameterText = ""
                                                 }
@@ -135,7 +135,7 @@ internal fun UpstreamApiExplorer(role: Role) {
                                 Row {
                                     Text(method.title, modifier = Modifier.weight(1f))
                                     val label = when (status) {
-                                        null -> if (method.required.isNotEmpty() || method.authKeyRequired) "入力が必要" else "未取得"
+                                        null -> if (method.required.isNotEmpty()) "入力が必要" else "未取得"
                                         LoadState.Fetching -> "取得中"
                                         is LoadState.Ready -> "取得済"
                                         is LoadState.Failed -> "取得失敗"

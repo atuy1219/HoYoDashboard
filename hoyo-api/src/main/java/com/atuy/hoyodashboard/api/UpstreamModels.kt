@@ -35,14 +35,14 @@ data class ZzzProfile(
     val achievementCount: Int,
     val agentCount: Int,
     val bangbooCount: Int,
-    val raw: JSONObject
+    override val raw: JSONObject
 ) : GameProfile
 
 data class HonkaiProfile(
     override val nickname: String,
     override val level: Int,
     val battlesuitCount: Int,
-    val raw: JSONObject
+    override val raw: JSONObject
 ) : GameProfile
 
 data class CharacterPreview(

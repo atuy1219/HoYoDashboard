@@ -35,13 +35,24 @@ class CookieSessionManager(
     }
 
     suspend fun ensureGachaCookie(cookie: String, region: ApiRegion): String {
-        val current = parse(cookie)
+        fun normalized(values: Map<String, String>): Map<String, String> = values.toMutableMap().apply {
+            putIfAbsent("account_id_v2", values["ltuid_v2"].orEmpty())
+            putIfAbsent("account_mid_v2", values["ltmid_v2"].orEmpty())
+        }.filterValues { it.isNotBlank() }
+        fun serialize(values: Map<String, String>) =
+            values.entries.joinToString("; ") { it.key + "=" + it.value }
+
+        val current = normalized(parse(cookie))
+        val normalizedCookie = serialize(current)
         if (!current["cookie_token_v2"].isNullOrBlank() &&
             !current["account_id_v2"].isNullOrBlank() &&
             !current["account_mid_v2"].isNullOrBlank()
-        ) return cookie
-        val refreshed = refresh(cookie, region)
-        val result = parse(refreshed ?: cookie)
+        ) {
+            if (normalizedCookie != cookie) onCookieUpdate?.invoke(normalizedCookie)
+            return normalizedCookie
+        }
+        val refreshed = refresh(normalizedCookie, region) ?: normalizedCookie
+        val result = normalized(parse(refreshed))
         require(
             !result["cookie_token_v2"].isNullOrBlank() &&
                 !result["account_id_v2"].isNullOrBlank() &&
@@ -49,7 +60,7 @@ class CookieSessionManager(
         ) {
             "Authkey generation requires cookie_token_v2, account_id_v2 and account_mid_v2. Re-link HoYoLAB."
         }
-        return refreshed ?: cookie
+        return refreshed
     }
 
     private fun refreshOverseasV2(cookies: Map<String, String>): Map<String, String>? {
@@ -104,7 +115,11 @@ class CookieSessionManager(
 
     private fun refreshOverseasLegacy(cookies: Map<String, String>): Map<String, String>? {
         val uid = cookies["account_id"] ?: cookies["ltuid"] ?: return null
-        val body = JSONObject(cookies).put("uid", uid)
+        val body = JSONObject(cookies).apply {
+            remove("ltuid")
+            remove("account_id")
+            put("uid", uid)
+        }
         val response = request(
             "POST",
             "https://api-account-os.hoyolab.com/account/auth/api/getCookieAccountInfoBySToken",

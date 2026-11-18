@@ -150,6 +150,9 @@ object UpstreamCatalog {
         r("get_starrail_lineup_game_modes", "スタレ編成モード", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "tag"),
         r("get_starrail_lineups", "スタレ編成一覧", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "lineup/index", defaults = mapOf("page" to "1")),
         r("get_starrail_lineup_schedules", "忘却の庭・開催期間", "編成", ApiGame.STARRAIL, ApiScope.HSR_LINEUP, "schedule/challenge"),
+        r("get_genshin_announcements", "原神のお知らせ", "お知らせ", ApiGame.GENSHIN, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),
+        r("get_starrail_announcements", "スタレのお知らせ", "お知らせ", ApiGame.STARRAIL, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),
+        r("get_zzz_announcements", "ゼンゼロのお知らせ", "お知らせ", ApiGame.ZZZ, ApiScope.ANNOUNCEMENT, "announcement/api/getAnnList"),
         r("get_starrail_warp_brief", "跳躍概要", "ガチャ", ApiGame.STARRAIL, ApiScope.HSR_WARP, "brief", requiresBadge = true),
         r("get_starrail_warp_pool_stats", "跳躍統計", "ガチャ", ApiGame.STARRAIL, ApiScope.HSR_WARP, "pool_stat", required = setOf("gacha_type"), requiresBadge = true),
         r("get_starrail_five_star_warps", "星5跳躍履歴", "ガチャ", ApiGame.STARRAIL, ApiScope.HSR_WARP, "five_star_list", required = setOf("gacha_type"), requiresBadge = true),
@@ -160,17 +163,17 @@ object UpstreamCatalog {
         r("transaction_log", "通貨取引明細", "取引履歴", ApiGame.GENSHIN, ApiScope.TRANSACTION, "GetActionLog", required = setOf("kind"), authKeyRequired = true),
 
         r("search_users", "HoYoLABユーザー検索", "HoYoLAB", null, ApiScope.BBS, "community/search/wapi/search/user", required = setOf("keyword"), defaults = mapOf("page_size" to "20")),
-        r("get_hoyolab_user", "HoYoLABユーザー", "HoYoLAB", null, ApiScope.BBS, "community/user/wapi/getUserFullInfo", required = setOf("uid")),
-        r("get_web_events", "HoYoLAB Webイベント", "HoYoLAB", null, ApiScope.BBS, "community/community_contribution/wapi/event/list", required = setOf("gids"), defaults = mapOf("size" to "20", "offset" to "")),
+        r("get_hoyolab_user", "HoYoLABユーザー", "HoYoLAB", null, ApiScope.BBS, "community/painter/wapi/user/full"),
+        r("get_web_events", "HoYoLAB Webイベント", "HoYoLAB", null, ApiScope.BBS, "community/community_contribution/wapi/event/list", defaults = mapOf("size" to "15", "offset" to "")),
         r("get_mimo_games", "Mimo対応ゲーム", "HoYoLAB", null, ApiScope.MIMO, "index"),
         r("get_mimo_tasks", "Mimoタスク", "HoYoLAB", null, ApiScope.MIMO, "task-list", required = setOf("game_id", "version_id")),
         r("get_mimo_shop_items", "Mimoショップ", "HoYoLAB", null, ApiScope.MIMO, "exchange-list", required = setOf("game_id", "version_id")),
         r("get_mimo_lottery_info", "Mimo抽選情報", "HoYoLAB", null, ApiScope.MIMO, "lottery-info", required = setOf("game_id", "version_id")),
         r("get_mimo_point_history", "Mimoポイント履歴", "HoYoLAB", null, ApiScope.MIMO, "point-record", required = setOf("game_id", "version_id")),
         r("get_accompany_characters", "HoYoLABコンパニオン", "HoYoLAB", null, ApiScope.BBS, "community/painter/api/getChannelRoleList", "READ_POST"),
-        r("get_accompany_character_details", "コンパニオン情報", "HoYoLAB", null, ApiScope.BBS, "community/painter/api/topic/info", required = setOf("topic_id")),
-        r("get_accompany_character_posts", "コンパニオン投稿", "HoYoLAB", null, ApiScope.BBS, "community/post/api/topic/post/list", "READ_POST", required = setOf("topic_id")),
-        r("get_accompany_voice_setting", "ボイス設定", "HoYoLAB", null, ApiScope.BBS, "community/user/api/role_setting/get", "READ_POST")
+        r("get_accompany_character_details", "コンパニオン情報", "HoYoLAB", null, ApiScope.BBS, "community/painter/api/topic/info", defaults = mapOf("scene" to "SceneAll"), required = setOf("topic_id")),
+        r("get_accompany_character_posts", "コンパニオン投稿", "HoYoLAB", null, ApiScope.BBS, "community/post/api/topic/post/list", "READ_POST", defaults = mapOf("scene" to "1", "list_type" to "hot", "page_size" to "15", "is_first_brush" to "true", "last_id" to "", "client_param" to "", "session_param" to ""), required = setOf("topic_id")),
+        r("get_accompany_voice_setting", "ボイス設定", "HoYoLAB", null, ApiScope.BBS, "community/user/api/role_setting/get", "READ_POST", defaults = mapOf("types" to "[\"SettingTypeVoiceScript\"]"), required = setOf("game_id", "role_id"))
     )
 
     private val byName = methods.associateBy { it.name }

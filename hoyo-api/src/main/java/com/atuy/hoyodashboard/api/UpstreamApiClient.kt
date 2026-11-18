@@ -54,6 +54,36 @@ class UpstreamApiClient(
         require(method.game == null || method.game == account.game) {
             "Endpoint not supported for " + account.game
         }
+        if (method.name == "get_genshin_user" || method.name == "get_starrail_user") {
+            val index = call(cookie, account, method.copy(name = method.name + "_index"), arguments)
+            val other = if (method.name == "get_genshin_user") {
+                "get_genshin_characters"
+            } else "get_starrail_basic_info"
+            val details = call(cookie, account, other, arguments)
+            val combined = JSONObject(index.toString())
+            val keys = details.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                combined.put(key, details.opt(key))
+            }
+            return combined
+        }
+        if (method.name == "get_genshin_detailed_characters" &&
+            arguments["character_ids"].isNullOrBlank()
+        ) {
+            val characters = call(cookie, account, "get_genshin_characters")
+            val rows = characters.optJSONArray("list") ?: JSONArray()
+            val ids = JSONArray()
+            for (i in 0 until rows.length()) {
+                val id = rows.optJSONObject(i)?.optInt("id", 0) ?: 0
+                if (id > 0) ids.put(id)
+            }
+            if (ids.length() == 0) return JSONObject().put("list", JSONArray())
+            return call(
+                cookie, account, method.copy(name = "get_genshin_character_details_raw"),
+                arguments + ("character_ids" to ids.toString())
+            )
+        }
         val params = method.defaults.mapValues { (_, value) ->
             value.replace("{uid}", account.uid).replace("{server}", account.server)
         }.toMutableMap()

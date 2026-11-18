@@ -115,6 +115,13 @@ class UpstreamApiClient(
             params[key].isNullOrBlank() || params[key]!!.startsWith("{")
         }
         require(missing.isEmpty()) { "Missing parameters: " + missing.joinToString() }
+        val transactionKind = if (method.scope == ApiScope.TRANSACTION) {
+            params.remove("kind")?.lowercase()?.also {
+                require(it in setOf("primogem", "crystal", "resin", "artifact", "weapon")) {
+                    "Unsupported transaction kind: " + it
+                }
+            }
+        } else null
         if (method.authKeyRequired && params["authkey"].isNullOrBlank()) {
             val authAppId = if (method.scope == ApiScope.TRANSACTION) "csc" else "webview_gacha"
             params["authkey"] = generateAuthKey(cookie, account, authAppId)
@@ -166,19 +173,18 @@ class UpstreamApiClient(
         }
         if (method.scope == ApiScope.GACHA) {
             params["authkey_ver"] = "1"
-            params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty(), "UTF-8")
+            params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty().replace("+", "%2B"), "UTF-8")
             params["lang"] = language.substringBefore('-')
             params["game_biz"] = gameBiz(account)
             params.putIfAbsent("size", "20")
             params.putIfAbsent("page", "1")
             params.putIfAbsent("end_id", "0")
-            params.putIfAbsent("gacha_type", "1")
-            params.putIfAbsent("real_gacha_type", params["gacha_type"] ?: "1")
+            params["real_gacha_type"] = params["gacha_type"] ?: error("gacha_type is required")
         }
         if (method.scope == ApiScope.TRANSACTION) {
             params["authkey_ver"] = "1"
             params["sign_type"] = "2"
-            params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty(), "UTF-8")
+            params["authkey"] = java.net.URLDecoder.decode(params["authkey"].orEmpty().replace("+", "%2B"), "UTF-8")
             params["lang"] = language.substringBefore('-')
             params.putIfAbsent("size", "20")
             params.putIfAbsent("end_id", "0")
@@ -189,6 +195,7 @@ class UpstreamApiClient(
             params.putIfAbsent("page_size", "1000")
         }
         val path = when {
+            transactionKind != null -> "Get" + transactionKind.replaceFirstChar { it.uppercase() } + "Log"
             method.scope == ApiScope.MIMO &&
                 (account.game == ApiGame.GENSHIN || params["game_id"] == "2") ->
                 "qiuqiu/" + method.endpoint.replace("-", "_")
@@ -419,10 +426,10 @@ class ApiTransport(
             if (status !in 200..299) throw HoYoApiException("HTTP " + status)
             val response = JSONObject(payload)
             val code = response.optInt("retcode", response.optInt("code", 0))
+            mergeSetCookies(cookie, connection.headerFields)
             if (code != 0) {
                 throw HoYoApiException(response.optString("message").ifBlank { "API error " + code } + " (" + code + ")")
             }
-            mergeSetCookies(cookie, connection.headerFields)
             when (val result = response.opt("data")) {
                 is JSONObject -> result
                 is JSONArray -> JSONObject().put("list", result)

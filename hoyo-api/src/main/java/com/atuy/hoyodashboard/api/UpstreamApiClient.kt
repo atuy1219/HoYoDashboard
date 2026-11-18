@@ -198,7 +198,8 @@ class UpstreamApiClient(
             val authAppId = if (method.scope == ApiScope.TRANSACTION) "csc" else "webview_gacha"
             params["authkey"] = generateAuthKey(cookie, account, authAppId)
         }
-        val base = route(method.scope, account.game, account.region)
+        val requestRegion = if (method.name == "get_genshin_banner_ids") ApiRegion.CHINESE else account.region
+        val base = route(method.scope, account.game, requestRegion)
         if (method.scope == ApiScope.RECORD) {
             if (method.useUidParam) {
                 params["uid"] = account.uid
@@ -282,6 +283,15 @@ class UpstreamApiClient(
         val path = when {
             method.name == "get_hoyolab_user" && account.region == ApiRegion.CHINESE ->
                 "user/wapi/getUserFullInfo"
+            method.name == "get_banner_details" -> {
+                require(account.game == ApiGame.GENSHIN || account.game == ApiGame.STARRAIL)
+                val gameName = if (account.game == ApiGame.STARRAIL) "hkrpg" else "hk4e"
+                val serverName = if (account.game == ApiGame.STARRAIL) "prod_official_asia" else "os_asia"
+                method.endpoint.replace("{game}", gameName)
+                    .replace("{server}", serverName)
+                    .replace("{banner_id}", params["banner_id"].orEmpty())
+                    .replace("{lang}", language)
+            }
             transactionKind != null -> "Get" + transactionKind.replaceFirstChar { it.uppercase() } + "Log"
             method.scope == ApiScope.MIMO &&
                 (account.game == ApiGame.GENSHIN || params["game_id"] == "2") ->
@@ -360,7 +370,7 @@ class UpstreamApiClient(
             account.region == ApiRegion.CHINESE)
         return try {
             transport.send(
-                base, path, activeCookie, account.region, language,
+                base, path, activeCookie, requestRegion, language,
                 if (post) "POST" else "GET", query, body, headers,
                 rpcHeaders = rpcHeaders, signed = signed
             )
@@ -372,7 +382,7 @@ class UpstreamApiClient(
                 badges.cookieFor(refreshedBase, account, language)
             } else refreshedBase
             transport.send(
-                base, path, refreshed, account.region, language,
+                base, path, refreshed, requestRegion, language,
                 if (post) "POST" else "GET", query, body, headers,
                 rpcHeaders = rpcHeaders, signed = signed
             )

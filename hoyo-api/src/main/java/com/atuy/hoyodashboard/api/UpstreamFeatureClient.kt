@@ -50,21 +50,41 @@ class UpstreamFeatureClient(
     }
 
     suspend fun fullBattleRecord(): JSONObject = when (account.game) {
-        ApiGame.GENSHIN -> raw("get_full_genshin_user")
+        ApiGame.GENSHIN -> JSONObject()
+            .put("user", raw("get_genshin_user"))
+            .put("spiral_abyss", raw("get_genshin_spiral_abyss"))
+            .put("previous_spiral_abyss", optionalRaw("get_genshin_spiral_abyss_previous"))
+            .put("imaginarium_theater", optionalRaw("get_imaginarium_theater"))
+            .put("activities", optionalRaw("get_genshin_activities"))
+            .put("envisaged_echoes", optionalRaw("get_envisaged_echoes"))
+            .put("stygian_onslaught", optionalRaw("get_stygian_onslaught"))
+            .put("tcg_preview", optionalRaw("get_genshin_tcg_preview"))
+            .put("tcg_matches", optionalRaw("get_genshin_tcg_matches"))
         ApiGame.STARRAIL -> JSONObject()
             .put("user", raw("get_starrail_user"))
             .put("forgotten_hall", raw("get_starrail_challenge"))
             .put("simulated_universe", raw("get_starrail_rogue"))
             .put("pure_fiction", raw("get_starrail_pure_fiction"))
             .put("apocalyptic_shadow", raw("get_starrail_apc_shadow"))
+            .put("anomaly_arbitration", optionalRaw("get_anomaly_arbitration"))
         ApiGame.ZZZ -> JSONObject()
             .put("user", raw("get_zzz_user"))
             .put("shiyu_defense", raw("get_shiyu_defense"))
             .put("deadly_assault", raw("get_deadly_assault"))
             .put("annihilation_simulacrum", raw("get_annihilation_simulacrum"))
             .put("lost_void", raw("get_lost_void_summary"))
+            .put("threshold_simulation_brief", optionalRaw("get_threshold_simulation_brief"))
+            .put("threshold_simulation", optionalRaw("get_threshold_simulation"))
         ApiGame.HONKAI -> raw("get_full_honkai_user")
         ApiGame.TOT -> throw UnsupportedOperationException("No Battle Chronicle exists for Tears of Themis.")
+    }
+
+    private suspend fun optionalRaw(method: String): JSONObject = try {
+        raw(method)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        JSONObject().put("_error", error.message ?: "取得できませんでした")
     }
 
     suspend fun gachaHistory(limit: Int? = null): List<GachaRecord> {

@@ -9,16 +9,22 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
 
-class HoYoClient {
+class HoYoClient(
+    private val onCookieUpdate: ((String) -> Unit)? = null,
+    private val language: String = "ja-jp"
+) {
     suspend fun dashboard(cookie: String): List<DashboardItem> = coroutineScope {
         accounts(cookie).map { role ->
             async {
                 try {
-                    DashboardItem(role, notes(cookie, role), null)
+                    if (role.game == Game.TOT) {
+                        DashboardItem(role, null, "未定事件簿にはリアルタイムノートがありません")
+                    } else {
+                        DashboardItem(role, notes(cookie, role), null)
+                    }
                 } catch (error: Exception) {
                     DashboardItem(role, null, error.message ?: "取得失敗")
                 }
@@ -26,22 +32,56 @@ class HoYoClient {
         }.awaitAll()
     }
 
-    suspend fun accounts(cookie: String): List<Role> {
-        val data = fetch("https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie", cookie)
+    suspend fun accounts(cookie: String): List<Role> = coroutineScope {
+        listOf(ApiRegion.OVERSEAS, ApiRegion.CHINESE).map { region ->
+            async {
+                runCatching { accounts(cookie, region) }.getOrDefault(emptyList())
+            }
+        }.awaitAll().flatten()
+            .distinctBy { Triple(it.game, it.uid, it.region) }
+            .sortedWith(compareBy<Role> { it.game.ordinal }.thenByDescending { it.level })
+    }
+
+    private suspend fun accounts(cookie: String, region: ApiRegion): List<Role> {
+        val host = if (region == ApiRegion.CHINESE) {
+            "https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie"
+        } else "https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie"
+        val data = fetch(host, cookie, region)
         val roles = data.optJSONArray("list") ?: return emptyList()
         return buildList {
             for (i in 0 until roles.length()) {
                 val value = roles.optJSONObject(i) ?: continue
+                val gameBiz = value.optString("game_biz").lowercase()
                 val game = when {
-                    value.optString("game_biz").startsWith("hk4e_") -> Game.GENSHIN
-                    value.optString("game_biz").startsWith("hkrpg_") -> Game.STAR_RAIL
-                    value.optString("game_biz").startsWith("nap_") -> Game.ZZZ
+                    gameBiz.startsWith("hk4e_") -> Game.GENSHIN
+                    gameBiz.startsWith("hkrpg_") -> Game.STAR_RAIL
+                    gameBiz.startsWith("nap_") -> Game.ZZZ
+                    gameBiz.startsWith("bh3_") -> Game.HONKAI
+                    gameBiz.startsWith("nxx_") -> Game.TOT
                     else -> null
                 } ?: continue
                 val uid = value.optString("game_uid")
-                val server = value.optString("region").ifBlank { serverFor(game, uid) }
-                if (uid.isNotBlank() && server.isNotBlank() && none { it.game == game && it.uid == uid }) {
-                    add(Role(game, uid, value.optString("nickname"), server))
+                val accountRegion = when {
+                    gameBiz.endsWith("_cn") -> ApiRegion.CHINESE
+                    gameBiz.endsWith("_global") -> ApiRegion.OVERSEAS
+                    else -> region
+                }
+                val server = value.optString("region").ifBlank {
+                    serverFor(game, uid, accountRegion)
+                }
+                if (uid.isNotBlank() && server.isNotBlank() &&
+                    none { it.game == game && it.uid == uid && it.region == accountRegion }
+                ) {
+                    add(
+                        Role(
+                            game = game,
+                            uid = uid,
+                            nickname = value.optString("nickname"),
+                            server = server,
+                            region = accountRegion,
+                            level = value.optInt("level", 0)
+                        )
+                    )
                 }
             }
         }
@@ -49,26 +89,51 @@ class HoYoClient {
 
     suspend fun notes(cookie: String, role: Role): DailyNote {
         val endpoint = when (role.game) {
-            Game.GENSHIN -> "https://sg-public-api.hoyolab.com/event/game_record/genshin/api/dailyNote"
-            Game.STAR_RAIL -> "https://bbs-api-os.hoyolab.com/game_record/hkrpg/api/note"
-            Game.ZZZ -> "https://sg-act-public-api.hoyolab.com/event/game_record_zzz/api/zzz/note"
+            Game.GENSHIN -> if (role.region == ApiRegion.CHINESE) {
+                "https://api-takumi-record.mihoyo.com/game_record/app/genshin/api/dailyNote"
+            } else "https://sg-public-api.hoyolab.com/event/game_record/genshin/api/dailyNote"
+            Game.STAR_RAIL -> if (role.region == ApiRegion.CHINESE) {
+                "https://api-takumi-record.mihoyo.com/game_record/app/hkrpg/api/note"
+            } else "https://bbs-api-os.hoyolab.com/game_record/hkrpg/api/note"
+            Game.ZZZ -> if (role.region == ApiRegion.CHINESE) {
+                "https://api-takumi-record.mihoyo.com/event/game_record_zzz/api/zzz/note"
+            } else "https://sg-act-public-api.hoyolab.com/event/game_record_zzz/api/zzz/note"
+            Game.HONKAI -> if (role.region == ApiRegion.CHINESE) {
+                "https://api-takumi-record.mihoyo.com/game_record/app/honkai3rd/api/note"
+            } else "https://bbs-api-os.hoyolab.com/game_record/honkai3rd/api/note"
+            Game.TOT -> throw UnsupportedOperationException("未定事件簿にはリアルタイムノートAPIがありません")
         }
-        val url = endpoint + "?role_id=" + encode(role.uid) + "&server=" + encode(role.server)
-        val data = fetch(url, cookie)
+        val data = fetch(
+            endpoint,
+            cookie,
+            role.region,
+            mapOf("role_id" to role.uid, "server" to role.server)
+        )
         val note = when (role.game) {
             Game.GENSHIN -> {
                 val tasks = data.optJSONObject("daily_task")
-                val done = tasks?.int("completed_tasks") ?: data.int("finished_task_num", "completed_commissions")
-                val total = (tasks?.int("max_tasks") ?: data.int("total_task_num", "max_commissions")).takeIf { it > 0 } ?: 4
-                val claimed = data.optBoolean("is_extra_task_reward_received") || data.optBoolean("claimed_commission_reward")
+                val done = tasks?.int("completed_tasks")
+                    ?: data.int("finished_task_num", "completed_commissions")
+                val total = (tasks?.int("max_tasks")
+                    ?: data.int("total_task_num", "max_commissions")).takeIf { it > 0 } ?: 4
+                val claimed = data.optBoolean("is_extra_task_reward_received") ||
+                    data.optBoolean("claimed_commission_reward")
                 DailyNote(
                     Progress(data.int("current_resin"), data.int("max_resin")),
                     data.long("resin_recovery_time", "remaining_resin_recovery_time"),
                     Progress(done, total),
                     done >= total && claimed,
                     listOf(
-                        Detail("洞天宝銭", value(data, "current_home_coin", "current_realm_currency") + " / " + value(data, "max_home_coin", "max_realm_currency")),
-                        Detail("派遣", data.int("current_expedition_num").toString() + " / " + data.int("max_expedition_num", "max_expeditions"))
+                        Detail(
+                            "洞天宝銭",
+                            value(data, "current_home_coin", "current_realm_currency") + " / " +
+                                value(data, "max_home_coin", "max_realm_currency")
+                        ),
+                        Detail(
+                            "派遣",
+                            data.int("current_expedition_num").toString() + " / " +
+                                data.int("max_expedition_num", "max_expeditions")
+                        )
                     )
                 )
             }
@@ -99,6 +164,26 @@ class HoYoClient {
                     )
                 )
             }
+            Game.HONKAI -> {
+                val greedy = data.optJSONObject("greedy_endless") ?: JSONObject()
+                val ultra = data.optJSONObject("ultra_endless") ?: JSONObject()
+                val arena = data.optJSONObject("battle_field") ?: JSONObject()
+                val godWar = data.optJSONObject("god_war") ?: JSONObject()
+                DailyNote(
+                    Progress(data.int("current_stamina"), data.int("max_stamina")),
+                    data.long("stamina_recover_time"),
+                    null,
+                    null,
+                    listOf(
+                        Detail("訓練スコア", data.int("current_train_score").toString()),
+                        Detail("古の楽園", greedy.int("cur_reward").toString() + " / " + greedy.int("max_reward")),
+                        Detail("超弦空間", ultra.int("group_level").toString() + " · " + ultra.int("challenge_score")),
+                        Detail("記憶戦場", arena.int("cur_reward").toString() + " / " + arena.int("max_reward")),
+                        Detail("往世楽土", godWar.int("cur_reward").toString() + " / " + godWar.int("max_reward"))
+                    )
+                )
+            }
+            Game.TOT -> error("unsupported")
         }
         return note.copy(rawFields = flatten(data))
     }
@@ -123,71 +208,147 @@ class HoYoClient {
         else -> listOf(Detail(path, value.toString()))
     }
 
-    private suspend fun fetch(url: String, cookie: String): JSONObject = withContext(Dispatchers.IO) {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+    private suspend fun fetch(
+        baseUrl: String,
+        cookie: String,
+        region: ApiRegion,
+        params: Map<String, String> = emptyMap()
+    ): JSONObject = withContext(Dispatchers.IO) {
+        val url = ApiUrlComposer.compose(baseUrl, "", params)
+        val connection = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 20_000
             requestMethod = "GET"
+            instanceFollowRedirects = false
             setRequestProperty("Cookie", cookie)
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36")
-            setRequestProperty("Referer", "https://www.hoyolab.com/")
-            setRequestProperty("x-rpc-language", "ja-jp")
-            setRequestProperty("x-rpc-lang", "ja-jp")
+            setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36"
+            )
+            setRequestProperty(
+                "Referer",
+                if (region == ApiRegion.CHINESE) "https://bbs.mihoyo.com/" else "https://www.hoyolab.com/"
+            )
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("x-rpc-language", language)
+            setRequestProperty("x-rpc-lang", language)
             setRequestProperty("x-rpc-client_type", "5")
-            setRequestProperty("x-rpc-app_version", "1.5.0")
-            setRequestProperty("DS", dynamicSecret())
+            setRequestProperty("x-rpc-app_version", if (region == ApiRegion.CHINESE) "2.11.1" else "1.5.0")
+            setRequestProperty("DS", dynamicSecret(region, params))
         }
         try {
             val status = connection.responseCode
-            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val payload = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (status !in 200..299) throw HoYoApiException("HTTP " + status)
+            val payload = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw HoYoApiException("HTTP $status")
             val root = JSONObject(payload)
-            val code = root.optInt("retcode")
-            if (code != 0) throw HoYoApiException(root.optString("message", "API error") + " (" + code + ")")
+            mergeSetCookies(cookie, connection.headerFields)
+            val code = root.optInt("retcode", root.optInt("code", 0))
+            if (code != 0) {
+                throw HoYoApiException(
+                    root.optString("message").ifBlank { "API error $code" } + " ($code)"
+                )
+            }
             root.optJSONObject("data") ?: JSONObject()
         } finally {
             connection.disconnect()
         }
     }
 
-    private fun dynamicSecret(): String {
-        val time = System.currentTimeMillis() / 1000
-        val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        val random = SecureRandom()
-        val nonce = buildString { repeat(6) { append(alphabet[random.nextInt(alphabet.length)]) } }
-        val seed = "salt=6s25p5ox5y14umn1p61aqyyvbvvl3lrt&t=" + time + "&r=" + nonce
-        val md5 = MessageDigest.getInstance("MD5").digest(seed.toByteArray())
-        return time.toString() + "," + nonce + "," + md5.joinToString("") { "%02x".format(it.toInt() and 255) }
+    private fun mergeSetCookies(cookie: String, headers: Map<String?, List<String>>?) {
+        val accepted = setOf(
+            "ltuid", "ltoken", "ltuid_v2", "ltoken_v2", "ltmid_v2",
+            "account_id", "account_id_v2", "account_mid_v2", "cookie_token",
+            "cookie_token_v2", "stoken", "stoken_v2", "login_ticket",
+            "login_ticket_token", "e_nap_token", "e_hkrpg_token", "e_lrsag"
+        )
+        val merged = linkedMapOf<String, String>()
+        cookie.split(';').forEach { part ->
+            val index = part.indexOf('=')
+            if (index > 0) {
+                val name = part.substring(0, index).trim()
+                val value = part.substring(index + 1).trim()
+                if (name in accepted && value.isNotEmpty()) merged[name] = value
+            }
+        }
+        headers.orEmpty().filterKeys { it.equals("set-cookie", ignoreCase = true) }
+            .values.flatten().forEach { header ->
+                val part = header.substringBefore(';').trim()
+                val index = part.indexOf('=')
+                if (index > 0) {
+                    val name = part.substring(0, index).trim()
+                    val value = part.substring(index + 1).trim()
+                    if (name in accepted) {
+                        if (value.isEmpty()) merged.remove(name) else merged[name] = value
+                    }
+                }
+            }
+        val updated = merged.entries.joinToString("; ") { it.key + "=" + it.value }
+        if (updated.isNotBlank() && updated != cookie) onCookieUpdate?.invoke(updated)
     }
 
-    private fun serverFor(game: Game, uid: String): String {
+    private fun dynamicSecret(region: ApiRegion, params: Map<String, String>): String {
+        val timestamp = System.currentTimeMillis() / 1000
+        val random = SecureRandom()
+        val nonce: String
+        val seed: String
+        if (region == ApiRegion.OVERSEAS) {
+            val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            nonce = buildString { repeat(6) { append(alphabet[random.nextInt(alphabet.length)]) } }
+            seed = "salt=6s25p5ox5y14umn1p61aqyyvbvvl3lrt&t=$timestamp&r=$nonce"
+        } else {
+            nonce = (100001 + random.nextInt(100000)).toString()
+            val query = params.toSortedMap().entries.joinToString("&") { it.key + "=" + it.value }
+            seed = "salt=xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs&t=$timestamp&r=$nonce&b=&q=$query"
+        }
+        val hash = MessageDigest.getInstance("MD5").digest(seed.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        return "$timestamp,$nonce,$hash"
+    }
+
+    private fun serverFor(game: Game, uid: String, region: ApiRegion): String {
+        val prefix = uid.firstOrNull()
         return when (game) {
-            Game.GENSHIN -> when (uid.firstOrNull()) {
+            Game.GENSHIN -> if (region == ApiRegion.CHINESE) {
+                when (prefix) {
+                    '5' -> "cn_qd01"
+                    '1', '2', '3' -> "cn_gf01"
+                    else -> ""
+                }
+            } else when (prefix) {
                 '6' -> "os_usa"
                 '7' -> "os_euro"
-                '8' -> "os_asia"
+                '8', '1' -> "os_asia"
                 '9' -> "os_cht"
                 else -> ""
             }
-            Game.STAR_RAIL -> when (uid.firstOrNull()) {
+            Game.STAR_RAIL -> if (region == ApiRegion.CHINESE) {
+                when (prefix) {
+                    '5' -> "prod_qd_cn"
+                    '1', '2' -> "prod_gf_cn"
+                    else -> ""
+                }
+            } else when (prefix) {
                 '6' -> "prod_official_usa"
                 '7' -> "prod_official_eur"
                 '8' -> "prod_official_asia"
                 '9' -> "prod_official_cht"
                 else -> ""
             }
-            Game.ZZZ -> when {
+            Game.ZZZ -> if (region == ApiRegion.CHINESE) {
+                if (uid.length == 8) "prod_gf_cn" else ""
+            } else when {
                 uid.startsWith("10") -> "prod_gf_us"
                 uid.startsWith("13") -> "prod_gf_jp"
                 uid.startsWith("15") -> "prod_gf_eu"
                 uid.startsWith("17") -> "prod_gf_sg"
                 else -> ""
             }
+            Game.HONKAI -> if (region == ApiRegion.CHINESE) "cn01" else "overseas01"
+            Game.TOT -> if (region == ApiRegion.CHINESE) "prod_gf_cn" else "prod_official"
         }
     }
 
-    private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
     private fun value(o: JSONObject, vararg keys: String): String = keys.firstNotNullOfOrNull {
         o.opt(it)?.takeUnless { raw -> raw == JSONObject.NULL }?.toString()
     } ?: "—"

@@ -76,22 +76,39 @@ data class GachaRecord(
     val itemType: String?,
     val rarity: Int,
     val time: String,
+    val timestamp: Long,
+    val timezoneOffset: Int,
     val bannerType: Int,
+    val bannerId: String?,
     val itemId: String?,
+    val isUp: Boolean?,
     val raw: JSONObject
 ) {
     companion object {
-        fun from(value: JSONObject, bannerType: Int) = GachaRecord(
-            id = value.string("id"),
-            uid = value.stringOrNull("uid"),
-            name = value.string("name"),
-            itemType = value.stringOrNull("item_type"),
-            rarity = value.int("rank_type", "rarity"),
-            time = value.string("time"),
-            bannerType = bannerType,
-            itemId = value.stringOrNull("item_id"),
-            raw = value
-        )
+        fun from(value: JSONObject, bannerType: Int = 0): GachaRecord {
+            val time = value.string("time")
+            val timezoneOffset = value.int("tz_offset")
+            val timestamp = runCatching {
+                java.time.LocalDateTime.parse(time)
+                    .toInstant(java.time.ZoneOffset.ofHours(8 + timezoneOffset))
+                    .toEpochMilli()
+            }.getOrDefault(0L)
+            return GachaRecord(
+                id = value.string("id"),
+                uid = value.stringOrNull("uid"),
+                name = value.string("name", "item_name"),
+                itemType = value.stringOrNull("item_type"),
+                rarity = value.int("rank_type", "rarity"),
+                time = time,
+                timestamp = timestamp,
+                timezoneOffset = timezoneOffset,
+                bannerType = value.int("gacha_type", "op_gacha_type", "real_gacha_type").takeIf { it > 0 } ?: bannerType,
+                bannerId = value.stringOrNull("gacha_id", "schedule_id", "banner_id"),
+                itemId = value.stringOrNull("item_id"),
+                isUp = value.opt("is_up")?.toString()?.toBooleanStrictOrNull(),
+                raw = value
+            )
+        }
     }
 }
 

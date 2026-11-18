@@ -113,6 +113,32 @@ class UpstreamFeatureClient(
         return raw(method).jsonList()
     }
 
+    suspend fun genshinBannerIds(): List<String> {
+        require(account.game == ApiGame.GENSHIN)
+        val rows = raw("get_genshin_banner_ids").optJSONArray("list") ?: JSONArray()
+        return (0 until rows.length()).mapNotNull { rows.optString(it).takeIf(String::isNotBlank) }
+    }
+
+    suspend fun bannerNames(): Map<Int, String> {
+        require(account.game == ApiGame.GENSHIN)
+        val result = raw("get_genshin_banner_names")
+        return result.keys().asSequence().mapNotNull { key ->
+            key.toIntOrNull()?.let { it to result.optString(key) }
+        }.toMap()
+    }
+
+    suspend fun bannerDetails(ids: List<String>? = null): List<JSONObject> {
+        require(account.game == ApiGame.GENSHIN || account.game == ApiGame.STARRAIL)
+        val args = ids?.let { mapOf("banner_ids" to JSONArray(it).toString()) } ?: emptyMap()
+        return raw("get_banner_details", args).jsonList()
+    }
+
+    suspend fun accompanyPosts(topicId: Long, scene: Int = 1, listType: String = "hot"): List<JSONObject> =
+        raw(
+            "get_accompany_character_posts",
+            mapOf("topic_id" to topicId.toString(), "scene" to scene.toString(), "list_type" to listType)
+        ).jsonList()
+
     suspend fun tcgCards(): List<JSONObject> {
         require(account.game == ApiGame.GENSHIN)
         return raw("get_tcg_cards").jsonList()

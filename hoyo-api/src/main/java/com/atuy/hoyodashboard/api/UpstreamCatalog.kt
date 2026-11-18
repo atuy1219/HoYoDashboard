@@ -56,6 +56,8 @@ object UpstreamCatalog {
     val methods: List<ApiMethod> = listOf(
         r("get_partial_genshin_user", "プレイヤー概要", "プロフィール", ApiGame.GENSHIN, ApiScope.RECORD, "index", defaults = mapOf("avatar_list_type" to "0")),
         r("get_genshin_user", "プレイヤー戦績", "プロフィール", ApiGame.GENSHIN, ApiScope.RECORD, "index"),
+        r("get_full_genshin_user", "原神の全戦績", "プロフィール", ApiGame.GENSHIN, ApiScope.RECORD, "index"),
+
         r("get_genshin_characters", "キャラクター一覧", "キャラクター", ApiGame.GENSHIN, ApiScope.RECORD, "character/list", "READ_POST"),
         r("get_genshin_detailed_characters", "装備・聖遺物・天賦", "キャラクター", ApiGame.GENSHIN, ApiScope.RECORD, "character/detail", "READ_POST"),
         r("get_genshin_spiral_abyss", "深境螺旋", "戦闘記録", ApiGame.GENSHIN, ApiScope.RECORD, "spiralAbyss", defaults = mapOf("schedule_type" to "1")),
@@ -89,6 +91,8 @@ object UpstreamCatalog {
         r("get_bangboos", "ボンプ一覧", "キャラクター", ApiGame.ZZZ, ApiScope.RECORD, "buddy/info"),
         r("get_zzz_agent_info", "エージェント装備・詳細", "キャラクター", ApiGame.ZZZ, ApiScope.RECORD, "avatar/info"),
         r("get_zzz_upgrade_guide_agents", "育成対象のエージェント", "育成", ApiGame.ZZZ, ApiScope.CULTIVATE, "user/avatar_basic_list", requiresBadge = true),
+        r("get_all_zzz_agent_upgrade_guides", "全エージェント育成ガイド", "育成", ApiGame.ZZZ, ApiScope.CULTIVATE, "user/batch_avatar_detail_v2", requiresBadge = true),
+
         r("get_zzz_agent_upgrade_guide", "エージェント育成ガイド", "育成", ApiGame.ZZZ, ApiScope.CULTIVATE, "user/batch_avatar_detail_v2", "READ_POST", required = setOf("avatar_list"), requiresBadge = true),
         r("get_shiyu_defense", "式輿防衛", "戦闘記録", ApiGame.ZZZ, ApiScope.RECORD, "hadal_info_v2", defaults = mapOf("schedule_type" to "1")),
         r("get_deadly_assault", "危局強襲戦", "戦闘記録", ApiGame.ZZZ, ApiScope.RECORD, "hadal_mem_detail_v2", defaults = mapOf("schedule_type" to "1"), useUidParam = true),
@@ -102,6 +106,9 @@ object UpstreamCatalog {
         r("get_zzz_gacha_info", "現在の変調情報", "ガチャ", ApiGame.ZZZ, ApiScope.RECORD, "cur_gacha_detail", useUidParam = true),
 
         r("get_honkai_user", "崩壊3rd戦績", "プロフィール", ApiGame.HONKAI, ApiScope.RECORD, "index"),
+        r("get_honkai_abyss", "崩壊3rd・深淵", "戦闘記録", ApiGame.HONKAI, ApiScope.RECORD, "index"),
+        r("get_full_honkai_user", "崩壊3rdの全戦績", "プロフィール", ApiGame.HONKAI, ApiScope.RECORD, "index"),
+
         r("get_honkai_battlesuits", "戦乙女", "キャラクター", ApiGame.HONKAI, ApiScope.RECORD, "characters"),
         r("get_honkai_old_abyss", "量子多様体", "戦闘記録", ApiGame.HONKAI, ApiScope.RECORD, "latestOldAbyssReport"),
         r("get_honkai_superstring_abyss", "超弦空間", "戦闘記録", ApiGame.HONKAI, ApiScope.RECORD, "newAbyssReport"),

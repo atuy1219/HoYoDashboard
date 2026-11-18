@@ -242,10 +242,19 @@ class UpstreamApiClient(
                 badges.cookieFor(refreshed, account, language)
             }
         } else cookie
+        val rpcHeaders = method.scope in setOf(
+            ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT,
+            ApiScope.CULTIVATE, ApiScope.HSR_WARP
+        ) || (method.scope == ApiScope.REWARD && account.region == ApiRegion.CHINESE)
+        val signed = method.scope in setOf(
+            ApiScope.RECORD, ApiScope.CARD, ApiScope.BBS, ApiScope.ANNOUNCEMENT
+        ) || ((method.scope == ApiScope.REWARD || method.scope == ApiScope.CULTIVATE ||
+            method.scope == ApiScope.HSR_WARP) && account.region == ApiRegion.CHINESE)
         return try {
             transport.send(
                 base, path, activeCookie, account.region, language,
-                if (post) "POST" else "GET", query, body, headers
+                if (post) "POST" else "GET", query, body, headers,
+                rpcHeaders = rpcHeaders, signed = signed
             )
         } catch (error: HoYoApiException) {
             if (!isRefreshable(error)) throw error
@@ -256,7 +265,8 @@ class UpstreamApiClient(
             } else refreshedBase
             transport.send(
                 base, path, refreshed, account.region, language,
-                if (post) "POST" else "GET", query, body, headers
+                if (post) "POST" else "GET", query, body, headers,
+                rpcHeaders = rpcHeaders, signed = signed
             )
         }
     }
@@ -411,7 +421,9 @@ class ApiTransport(
         verb: String,
         params: Map<String, String>,
         body: JSONObject?,
-        headers: Map<String, String> = emptyMap()
+        headers: Map<String, String> = emptyMap(),
+        rpcHeaders: Boolean = false,
+        signed: Boolean = false
     ): JSONObject = withContext(Dispatchers.IO) {
         require(verb == "GET" || verb == "POST")
         val url = ApiUrlComposer.compose(base, endpoint, params)
@@ -422,13 +434,16 @@ class ApiTransport(
             instanceFollowRedirects = false
             setRequestProperty("Cookie", cookie)
             setRequestProperty("User-Agent", userAgent)
-            setRequestProperty("Referer", if (region == ApiRegion.CHINESE) "https://bbs.mihoyo.com/" else "https://www.hoyolab.com/")
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("x-rpc-language", language)
-            setRequestProperty("x-rpc-lang", language)
-            setRequestProperty("x-rpc-app_version", if (region == ApiRegion.CHINESE) "2.11.1" else "1.5.0")
-            setRequestProperty("x-rpc-client_type", "5")
-            setRequestProperty("DS", dynamicSecret(region, body, params))
+            if (rpcHeaders) {
+                setRequestProperty("x-rpc-language", language)
+                setRequestProperty("x-rpc-lang", language)
+            }
+            if (signed) {
+                setRequestProperty("x-rpc-app_version", if (region == ApiRegion.CHINESE) "2.11.1" else "1.5.0")
+                setRequestProperty("x-rpc-client_type", "5")
+                setRequestProperty("DS", dynamicSecret(region, body, params))
+            }
             headers.forEach { (name, value) -> setRequestProperty(name, value) }
             if (body != null) {
                 doOutput = true

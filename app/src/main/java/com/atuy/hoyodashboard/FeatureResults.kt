@@ -171,7 +171,7 @@ private fun ResultObject(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 FeatureImage(portrait)
                 title?.let {
-                    if (result.keys().asSequence().none { key ->
+                    if (it.hasGameReferences() || result.keys().asSequence().none { key ->
                             key in setOf("nickname", "nick_name", "author_nickname")
                         }) JapaneseContent(it, MaterialTheme.typography.titleSmall)
                     else Text(displayText(it), fontWeight = FontWeight.SemiBold)
@@ -220,8 +220,8 @@ private fun ResultObject(
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(fieldLabel(key), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                            if (value is String && key !in userNameFields) {
-                                JapaneseContent(if (text == displayText(value)) value else text,
+                            if (value is String && (key !in userNameFields || value.hasGameReferences())) {
+                                JapaneseContent(if (value.hasGameReferences() || text == displayText(value)) value else text,
                                     modifier = Modifier.weight(1f))
                             } else Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium)
@@ -300,7 +300,7 @@ private fun containsForeignText(value: Any?): Boolean = when (value) {
         key !in userNameFields && key !in hiddenFields && containsForeignText(value.opt(key))
     }
     is JSONArray -> (0 until minOf(value.length(), 50)).any { containsForeignText(value.opt(it)) }
-    is String -> likelyForeignText(value)
+    is String -> likelyForeignText(value.withoutGameReferenceMarkup())
     else -> false
 }
 

@@ -5,12 +5,15 @@ import android.text.Html
 import android.text.style.URLSpan
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.Modifier
@@ -44,60 +47,63 @@ internal fun JapaneseContent(value: String, style: TextStyle = MaterialTheme.typ
     val gameReferenceHandler = LocalGameReferenceHandler.current
     val uriHandler = LocalUriHandler.current
     val parsed = remember(value) { parseLinks(value) }
-    val original = parsed.text
-    val translation by produceState<TranslationResult?>(null, original, enabled) {
+    var missingReference by remember(value) { mutableStateOf<GameTextReference?>(null) }
+    val translation by produceState<TranslationResult?>(null, parsed, enabled) {
         this.value = null
-        if (enabled && likelyForeignText(original)) {
+        if (enabled && likelyForeignText(parsed.text)) {
             this.value = try {
-                TranslationResult(translateJapanese(original))
+                TranslationResult(parsed.mapText(::translateFragment))
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                TranslationResult(original, failed = true)
+                TranslationResult(parsed, failed = true)
             }
         }
     }
     Column(modifier) {
-        val translated = if (enabled) translation?.text else null
+        val displayed = if (enabled) translation?.content ?: parsed else parsed
         fun openLink(link: TextLink) {
             val id = gameReferenceId(link.url)
             if (id != null) {
-                val reference = GameTextReference(id, original.substring(link.start, link.end).trim())
+                val reference = GameTextReference(id, link.label)
                 if (gameReferenceHandler != null) gameReferenceHandler(reference)
-                else gameReferenceUrl(id)?.let { runCatching { uriHandler.openUri(it) } }
+                else {
+                    val url = gameReferenceUrl(id)
+                    if (url == null || runCatching { uriHandler.openUri(url) }.isFailure) missingReference = reference
+                }
             } else runCatching { uriHandler.openUri(link.url) }
         }
-        if (translated == null || translated == original) {
-            val color = MaterialTheme.colorScheme.primary
-            val annotated = remember(parsed, color, uriHandler, gameReferenceHandler) {
-                buildAnnotatedString {
-                    append(original)
-                    parsed.links.forEach { link ->
-                        val styles = TextLinkStyles(style = SpanStyle(
-                            color = color, textDecoration = TextDecoration.Underline
-                        ))
-                        val annotation = if (gameReferenceId(link.url) != null) {
-                            LinkAnnotation.Clickable(link.url, styles, linkInteractionListener = { openLink(link) })
-                        } else LinkAnnotation.Url(link.url, styles, linkInteractionListener = { openLink(link) })
-                        when (annotation) {
-                            is LinkAnnotation.Clickable -> addLink(annotation, link.start, link.end)
-                            is LinkAnnotation.Url -> addLink(annotation, link.start, link.end)
-                        }
+        val color = MaterialTheme.colorScheme.primary
+        val annotated = remember(displayed, color, uriHandler, gameReferenceHandler) {
+            buildAnnotatedString {
+                append(displayed.text)
+                displayed.links.forEach { link ->
+                    val styles = TextLinkStyles(style = SpanStyle(
+                        color = color, textDecoration = TextDecoration.Underline
+                    ))
+                    if (gameReferenceId(link.url) != null) {
+                        addLink(LinkAnnotation.Clickable(link.url, styles, linkInteractionListener = { openLink(link) }),
+                            link.start, link.end)
+                    } else {
+                        addLink(LinkAnnotation.Url(link.url, styles, linkInteractionListener = { openLink(link) }),
+                            link.start, link.end)
                     }
                 }
             }
-            Text(annotated, style = style)
-        } else {
-            Text(translated, style = style)
-            parsed.links.distinctBy { it.url }.forEach { link ->
-                val label = original.substring(link.start, link.end).takeIf { it != link.url } ?: "リンクを開く"
-                TextButton(onClick = { openLink(link) }) { Text(label) }
-            }
         }
+        Text(annotated, style = style)
         if (enabled && translation?.failed == true) {
             Text("日本語訳を取得できませんでした", color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall)
         }
+    }
+    missingReference?.let { reference ->
+        AlertDialog(
+            onDismissRequest = { missingReference = null },
+            title = { Text(reference.label.ifBlank { "参照先" }) },
+            text = { Text("参照先の説明データがありません。") },
+            confirmButton = { TextButton(onClick = { missingReference = null }) { Text("閉じる") } }
+        )
     }
 }
 
@@ -107,34 +113,40 @@ internal fun OpenWebLink(url: String, label: String = "リンクを開く") {
     TextButton(onClick = { runCatching { handler.openUri(url) } }) { Text(label) }
 }
 
-private data class TextLink(val start: Int, val end: Int, val url: String)
-private data class LinkedText(val text: String, val links: List<TextLink>)
-
 private fun parseLinks(value: String): LinkedText {
     val markup = value.replace(Regex("(?is)<(style|script)\\b[^>]*>.*?</\\1>"), "")
-        .withGameReferenceAnchors()
-    val html = if ('<' in markup || '&' in markup) Html.fromHtml(
-        markup,
+    val source = if (markup.hasGameReferences()) markup.replace("\\n", "\n") else markup
+    val html = if ('<' in source || '&' in source) Html.fromHtml(
+        if (markup.hasGameReferences()) source.replace("\n", "<br>") else source,
         Html.FROM_HTML_MODE_COMPACT
     ) else null
-    val text = html?.toString() ?: markup
-    val links = html?.getSpans(0, html.length, URLSpan::class.java).orEmpty().mapNotNull { span ->
+    val text = html?.toString() ?: source
+    val webLinks = html?.getSpans(0, html.length, URLSpan::class.java).orEmpty().mapNotNull { span ->
         val start = html?.getSpanStart(span) ?: -1
         val end = html?.getSpanEnd(span) ?: -1
-        val target = if (gameReferenceId(span.url) != null) span.url else webLink(span.url, relativeToHoYoLab = true)
-        target?.takeIf { start >= 0 && end > start }?.let { TextLink(start, end, it) }
-    }.toMutableList()
-    for (match in embeddedWebLink.findAll(text)) {
+        webLink(span.url, relativeToHoYoLab = true)?.takeIf { start >= 0 && end > start }
+            ?.let { TextLink(start, end, it, text.substring(start, end)) }
+    }
+    val parsed = parseGameReferences(text, webLinks)
+    val links = parsed.links.toMutableList()
+    for (match in embeddedWebLink.findAll(parsed.text)) {
         val raw = match.value.trimEnd('.', ',', ')', '。', '、', '！', '）')
         val end = match.range.first + raw.length
         if (links.none { it.start < end && it.end > match.range.first }) {
-            webLink(raw)?.let { links += TextLink(match.range.first, end, it) }
+            webLink(raw)?.let { links += TextLink(match.range.first, end, it, raw) }
         }
     }
-    return LinkedText(text, links.sortedBy { it.start })
+    return LinkedText(parsed.text, links.sortedBy { it.start })
 }
 
-private data class TranslationResult(val text: String, val failed: Boolean = false)
+private data class TranslationResult(val content: LinkedText, val failed: Boolean = false)
+
+private suspend fun translateFragment(value: String): String {
+    val trimmed = value.trim()
+    if (!likelyForeignText(trimmed)) return value
+    val start = value.indexOf(trimmed)
+    return value.substring(0, start) + translateJapanese(trimmed) + value.substring(start + trimmed.length)
+}
 
 private suspend fun translateJapanese(text: String): String = translationRequests.withPermit {
     translationCache.get(text)?.let { return@withPermit it }

@@ -11,7 +11,9 @@ data class PageSpec(
     val cursorField: String = "next_end_id",
     val itemsField: String = "list",
     val moreField: String = "has_more",
-    val maxPages: Int = 100,
+    val pageSize: Int? = null,
+    val lastItemCursorField: String? = null,
+    val maxPages: Int? = null,
     val pauseMilliseconds: Long = 250
 )
 
@@ -23,10 +25,10 @@ class UpstreamPaginator(private val client: UpstreamApiClient) {
         arguments: Map<String, String> = emptyMap(),
         spec: PageSpec = PageSpec()
     ): Flow<JSONObject> = flow {
-        require(spec.maxPages in 1..1000)
+        require(spec.maxPages == null || spec.maxPages > 0)
         require(spec.pauseMilliseconds in 0..60_000)
         var cursor: String? = arguments[spec.cursorParameter]
-        var previousCursor: String? = null
+        val cursors = hashSetOf<String>()
         var page = 0
         do {
             val query = arguments.toMutableMap()
@@ -34,32 +36,45 @@ class UpstreamPaginator(private val client: UpstreamApiClient) {
             if (spec.cursorParameter in setOf("page", "current_page") && cursor.isNullOrEmpty()) {
                 query[spec.cursorParameter] = "1"
             }
-            val response = client.call(cookie, account, method, query)
+            val response = client.callPage(cookie, account, method, query)
             emit(response)
             page++
 
-            val nextCursor = response.optString(spec.cursorField).ifEmpty {
+            val rows = response.optJSONArray(spec.itemsField) ?: JSONArray()
+            val responseCursor = response.optString(spec.cursorField).ifEmpty {
                 response.optString("next_page_token").ifEmpty {
                     response.optString("next_max_id")
                 }
             }
+            val lastItemCursor = spec.lastItemCursorField?.let { field ->
+                rows.optJSONObject(rows.length() - 1)?.opt(field)?.toString().orEmpty()
+            }.orEmpty()
+            val nextCursor = responseCursor.ifBlank { lastItemCursor }
+            val total = response.optInt("total", -1)
             val isPageNumber = spec.cursorParameter == "page" || spec.cursorParameter == "current_page"
             val hasMore = when {
                 response.has(spec.moreField) -> response.optBoolean(spec.moreField)
                 response.has("is_end") -> !response.optBoolean("is_end")
                 isPageNumber -> {
-                    val items = response.optJSONArray(spec.itemsField) ?: JSONArray()
-                    items.length() > 0
+                    val size = spec.pageSize
+                    when {
+                        rows.length() == 0 -> false
+                        size != null && total >= 0 -> (cursor?.toLongOrNull() ?: 1) * size < total
+                        size != null -> rows.length() >= size
+                        else -> true
+                    }
                 }
+                spec.pageSize != null -> rows.length() >= spec.pageSize
                 else -> nextCursor.isNotBlank()
             }
-            previousCursor = cursor
+            query[spec.cursorParameter]?.let(cursors::add)
             cursor = if (isPageNumber) {
                 (query[spec.cursorParameter]?.toIntOrNull() ?: 1).plus(1).toString()
             } else nextCursor
-            if (!hasMore || cursor.isNullOrBlank() || cursor == previousCursor) break
-            if (page < spec.maxPages) delay(spec.pauseMilliseconds)
-        } while (page < spec.maxPages)
+            if (!hasMore || cursor.isNullOrBlank() || cursor == "0" || cursor in cursors) break
+            if (spec.maxPages != null && page >= spec.maxPages) break
+            delay(spec.pauseMilliseconds)
+        } while (true)
     }
 
     fun items(

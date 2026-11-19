@@ -41,8 +41,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.atuy.hoyodashboard.api.japaneseApiError
 import com.atuy.hoyodashboard.api.DashboardItem
 import com.atuy.hoyodashboard.api.HoYoClient
+import com.atuy.hoyodashboard.api.Role
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -55,16 +58,21 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Dashboard() {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val client = remember { HoYoClient() }
+    val client = remember { HoYoClient(onCookieUpdate = { SecureCookieStore.save(context, it) }) }
     var linked by remember { mutableStateOf(SecureCookieStore.read(context) != null) }
     var items by remember { mutableStateOf<List<DashboardItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
     var selectedItem by remember { mutableStateOf<DashboardItem?>(null) }
+    var refreshTarget by remember { mutableStateOf<Role?>(null) }
+    var lastDiscovery by remember { mutableStateOf<Long?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode == Activity.RESULT_OK) {
             linked = true
+            items = emptyList()
+            refreshTarget = null
+            lastDiscovery = null
             refresh++
         }
     }
@@ -78,13 +86,18 @@ private fun Dashboard() {
         loading = true
         error = null
         try {
-            val updated = client.dashboard(cookie)
-            items = updated
-            selectedItem?.let { current ->
-                selectedItem = updated.firstOrNull { it.role == current.role }
+            val cached = lastDiscovery?.let { android.os.SystemClock.elapsedRealtime() - it < 30 * 60 * 1000L } == true
+            val roles = refreshTarget?.let(::listOf) ?: items.map { it.role }.takeIf { cached && it.isNotEmpty() }
+            client.dashboardUpdates(cookie, roles).collect { updated ->
+                items = (items.filterNot { it.role.sameAccount(updated.role) } + updated)
+                    .sortedWith(compareBy<DashboardItem> { it.role.game.ordinal }.thenByDescending { it.role.level })
+                if (selectedItem?.role?.sameAccount(updated.role) == true) selectedItem = updated
             }
+            if (roles == null) lastDiscovery = android.os.SystemClock.elapsedRealtime()
+        } catch (exception: CancellationException) {
+            throw exception
         } catch (exception: Exception) {
-            error = exception.message ?: "取得失敗"
+            error = japaneseApiError(exception)
         } finally {
             loading = false
         }
@@ -93,7 +106,10 @@ private fun Dashboard() {
     LaunchedEffect(linked) {
         while (linked) {
             delay(5 * 60 * 1000L)
-            refresh++
+            if (selectedItem == null && !loading) {
+                refreshTarget = null
+                refresh++
+            }
         }
     }
 
@@ -110,7 +126,10 @@ private fun Dashboard() {
                 GameDetailScreen(
                     item = selected,
                     onBack = { selectedItem = null },
-                    onRefresh = { refresh++ }
+                    onRefresh = {
+                        refreshTarget = selected.role
+                        refresh++
+                    }
                 )
             } else {
                 Column(
@@ -126,7 +145,10 @@ private fun Dashboard() {
                             modifier = Modifier.weight(1f)
                         )
                         if (linked) {
-                            Button(onClick = { refresh++ }, enabled = !loading) { Text("更新") }
+                            Button(onClick = {
+                                refreshTarget = null
+                                refresh++
+                            }, enabled = !loading) { Text("更新") }
                         }
                     }
                     if (!linked) {
@@ -158,6 +180,9 @@ private fun Dashboard() {
         }
     }
 }
+
+private fun Role.sameAccount(other: Role): Boolean =
+    game == other.game && uid == other.uid && region == other.region
 
 @Composable
 private fun StatusCard(item: DashboardItem, onClick: () -> Unit) {

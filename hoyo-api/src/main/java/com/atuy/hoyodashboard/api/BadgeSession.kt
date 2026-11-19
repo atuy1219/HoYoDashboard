@@ -1,30 +1,28 @@
 package com.atuy.hoyodashboard.api
 
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
+import java.security.MessageDigest
 
-class BadgeSession {
+class BadgeSession(private val transport: ApiTransport = ApiTransport()) {
     private val mutex = Mutex()
     private val cache = mutableMapOf<String, Pair<Long, String>>()
 
     suspend fun cookieFor(cookie: String, account: ApiAccount, language: String): String {
         require(account.game == ApiGame.ZZZ || account.game == ApiGame.STARRAIL)
-        require(account.region == ApiRegion.OVERSEAS) {
-            "Chinese-region badge login requires separate authentication handling."
-        }
-        val key = account.game.name + ":" + account.uid + ":" + cookie.hashCode()
+        val baseCookie = stripBadgeCookies(cookie)
+        val cookieHash = MessageDigest.getInstance("SHA-256")
+            .digest(baseCookie.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        val key = account.game.name + ":" + account.uid + ":" + cookieHash
         val now = System.currentTimeMillis()
         val tokens = mutex.withLock {
-            cache[key]?.takeIf { it.first > now }?.second ?: login(cookie, account, language).also {
-                cache[key] = (now + 24L * 60 * 60 * 1000) to it
+            cache[key]?.takeIf { it.first > now }?.second ?: login(baseCookie, account, language).also {
+                cache[key] = (now + 36L * 60 * 60 * 1000) to it
             }
         }
-        return cookie + "; " + tokens
+        return listOf(baseCookie, tokens).filter(String::isNotBlank).joinToString("; ")
     }
 
     suspend fun invalidate(account: ApiAccount) = mutex.withLock {
@@ -32,57 +30,36 @@ class BadgeSession {
         cache.keys.filter { it.startsWith(prefix) }.forEach(cache::remove)
     }
 
-    private suspend fun login(cookie: String, account: ApiAccount, language: String): String =
-        withContext(Dispatchers.IO) {
-            val gameBiz = when (account.game) {
-                ApiGame.ZZZ -> "nap_global"
-                ApiGame.STARRAIL -> "hkrpg_global"
-                else -> throw IllegalArgumentException("Badge login unsupported for the selected game")
-            }
-            val body = JSONObject()
-                .put("game_biz", gameBiz)
-                .put("lang", language)
-                .put("region", account.server)
-                .put("uid", account.uid)
-            val connection = (URL(
-                "https://sg-act-public-api.hoyolab.com/common/badge/v1/login/account"
-            ).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 15000
-                readTimeout = 20000
-                instanceFollowRedirects = false
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                setRequestProperty("Cookie", cookie)
-                setRequestProperty("Referer", "https://www.hoyolab.com/")
-                setRequestProperty("x-rpc-language", language)
-                setRequestProperty("x-rpc-lang", language)
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36")
-            }
-            try {
-                connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                val status = connection.responseCode
-                if (status !in 200..299) throw HoYoApiException("Badge login HTTP " + status)
-                val response = connection.inputStream.bufferedReader().use { it.readText() }
-                val parsed = JSONObject(response)
-                if (parsed.optInt("retcode") != 0) {
-                    throw HoYoApiException("Badge login: " + parsed.optString("message"))
-                }
-                val accepted = setOf(
-                    "e_nap_token", "e_hkrpg_token", "e_lrsag", "SERVERID", "SERVERCORSID"
-                )
-                val setCookies = connection.headerFields
-                    .filterKeys { it?.equals("set-cookie", ignoreCase = true) == true }
-                    .values.flatten()
-                    .map { it.substringBefore(';').trim() }
-                    .filter { part -> part.substringBefore('=') in accepted && part.contains('=') }
-                val name = if (account.game == ApiGame.ZZZ) "e_nap_token" else "e_hkrpg_token"
-                if (setCookies.none { it.startsWith(name + "=") }) {
-                    throw HoYoApiException("Badge token was not returned.")
-                }
-                setCookies.joinToString("; ")
-            } finally {
-                connection.disconnect()
-            }
+    private suspend fun login(cookie: String, account: ApiAccount, language: String): String {
+        val mainland = account.region == ApiRegion.CHINESE
+        val game = if (account.game == ApiGame.ZZZ) "nap" else "hkrpg"
+        val body = JSONObject().put("game_biz", game + if (mainland) "_cn" else "_global")
+            .put("lang", language).put("region", account.server).put("uid", account.uid)
+        val base = if (mainland) "https://api-takumi.mihoyo.com" else "https://sg-act-public-api.hoyolab.com"
+        val referer = if (mainland) "https://bbs.mihoyo.com/" else "https://www.hoyolab.com/"
+        val response = transport.exchange(
+            base, "common/badge/v1/login/account", cookie, account.region, language, "POST",
+            emptyMap(), body, mapOf("Referer" to referer), rpcHeaders = true, signed = mainland
+        )
+        response.requireSuccess()
+        val accepted = setOf("e_nap_token", "e_hkrpg_token", "e_lrsag", "SERVERID", "SERVERCORSID")
+        val tokens = response.headers.filterKeys { it.equals("set-cookie", ignoreCase = true) }
+            .values.flatten().map { it.substringBefore(';').trim() }
+            .filter { '=' in it && it.substringBefore('=') in accepted }
+        val name = if (account.game == ApiGame.ZZZ) "e_nap_token" else "e_hkrpg_token"
+        if (tokens.none { it.startsWith("$name=") && it.substringAfter('=').isNotBlank() }) {
+            throw HoYoApiException("ゲーム記録の認証情報を取得できませんでした")
         }
+        return tokens.joinToString("; ")
+    }
+
+    private fun stripBadgeCookies(cookie: String): String {
+        val stale = setOf("e_nap_token", "e_hkrpg_token", "e_lrsag", "SERVERID", "SERVERCORSID")
+        return cookie.split(';').mapNotNull { part ->
+            val token = part.trim()
+            val name = token.substringBefore('=').trim()
+            token.takeIf { name.isNotBlank() && name !in stale }
+        }.joinToString("; ")
+    }
+
 }

@@ -5,7 +5,10 @@ import java.net.URL
 import java.net.URLEncoder
 
 object ApiUrlComposer {
-    fun compose(base: String, endpoint: String, params: Map<String, String>): URL {
+    fun compose(
+        base: String, endpoint: String, params: Map<String, String>,
+        repeated: Map<String, List<String>> = emptyMap()
+    ): URL {
         require(endpoint.isEmpty() || (
             !endpoint.startsWith("/") &&
             !endpoint.startsWith("http") &&
@@ -21,6 +24,10 @@ object ApiUrlComposer {
         val query = buildList {
             origin.rawQuery?.takeIf { it.isNotBlank() }?.let { add(it) }
             params.forEach { (key, value) -> add(encode(key) + "=" + encode(value)) }
+            repeated.forEach { (key, values) ->
+                val name = encode(key)
+                values.forEach { value -> add(name + "=" + encode(value)) }
+            }
         }.joinToString("&")
         return URL("https://" + host + path + if (query.isEmpty()) "" else "?" + query)
     }

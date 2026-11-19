@@ -5,7 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
@@ -86,14 +91,49 @@ internal fun FeatureResult(
         }
     }
     var translate by remember(root, method) { mutableStateOf(true) }
+    val references = remember(root) { lazy { GameReferenceIndex(root) } }
+    val uriHandler = LocalUriHandler.current
+    var selectedReference by remember(root) { mutableStateOf<Pair<GameTextReference, GameReferenceEntry?>?>(null) }
+    val openReference: (GameTextReference) -> Unit = { reference ->
+        val entry = references.value.find(reference)
+        val url = gameReferenceUrl(reference.id)
+        if (entry != null || url == null || runCatching { uriHandler.openUri(url) }.isFailure) {
+            selectedReference = reference to entry
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (method in translatableFeatures || remember(root) { containsForeignText(root) }) {
             TextButton(onClick = { translate = !translate }) {
                 Text(if (translate) "原文を表示" else "日本語に翻訳")
             }
         }
-        CompositionLocalProvider(LocalJapaneseTranslation provides translate) {
+        CompositionLocalProvider(
+            LocalJapaneseTranslation provides translate,
+            LocalGameReferenceHandler provides openReference
+        ) {
             ResultObject(root, method, onOpen, depth = 0)
+            selectedReference?.let { (reference, entry) ->
+                AlertDialog(
+                    onDismissRequest = { selectedReference = null },
+                    title = { Text(reference.label.ifBlank { entry?.title ?: "参照先" }) },
+                    text = {
+                        Column(
+                            Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (entry == null) Text("参照先の説明データがありません。")
+                            else {
+                                FeatureImage(entry.icon)
+                                JapaneseContent(entry.description)
+                            }
+                            gameReferenceUrl(reference.id)?.let { OpenWebLink(it, "参照先を開く") }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { selectedReference = null }) { Text("閉じる") }
+                    }
+                )
+            }
         }
     }
 }

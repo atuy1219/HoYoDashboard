@@ -33,6 +33,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 internal val LocalJapaneseTranslation = staticCompositionLocalOf { true }
+internal val LocalGameReferenceHandler = staticCompositionLocalOf<((GameTextReference) -> Unit)?> { null }
 
 private val translationCache = LruCache<String, String>(120)
 private val translationRequests = Semaphore(2)
@@ -40,6 +41,8 @@ private val translationRequests = Semaphore(2)
 @Composable
 internal fun JapaneseContent(value: String, style: TextStyle = MaterialTheme.typography.bodyMedium, modifier: Modifier = Modifier) {
     val enabled = LocalJapaneseTranslation.current
+    val gameReferenceHandler = LocalGameReferenceHandler.current
+    val uriHandler = LocalUriHandler.current
     val parsed = remember(value) { parseLinks(value) }
     val original = parsed.text
     val translation by produceState<TranslationResult?>(null, original, enabled) {
@@ -56,17 +59,30 @@ internal fun JapaneseContent(value: String, style: TextStyle = MaterialTheme.typ
     }
     Column(modifier) {
         val translated = if (enabled) translation?.text else null
+        fun openLink(link: TextLink) {
+            val id = gameReferenceId(link.url)
+            if (id != null) {
+                val reference = GameTextReference(id, original.substring(link.start, link.end).trim())
+                if (gameReferenceHandler != null) gameReferenceHandler(reference)
+                else gameReferenceUrl(id)?.let { runCatching { uriHandler.openUri(it) } }
+            } else runCatching { uriHandler.openUri(link.url) }
+        }
         if (translated == null || translated == original) {
             val color = MaterialTheme.colorScheme.primary
-            val handler = LocalUriHandler.current
-            val annotated = remember(parsed, color, handler) {
+            val annotated = remember(parsed, color, uriHandler, gameReferenceHandler) {
                 buildAnnotatedString {
                     append(original)
                     parsed.links.forEach { link ->
-                        addLink(LinkAnnotation.Url(link.url, TextLinkStyles(style = SpanStyle(
+                        val styles = TextLinkStyles(style = SpanStyle(
                             color = color, textDecoration = TextDecoration.Underline
-                        )), linkInteractionListener = { runCatching { handler.openUri(link.url) }; Unit }),
-                            link.start, link.end)
+                        ))
+                        val annotation = if (gameReferenceId(link.url) != null) {
+                            LinkAnnotation.Clickable(link.url, styles, linkInteractionListener = { openLink(link) })
+                        } else LinkAnnotation.Url(link.url, styles, linkInteractionListener = { openLink(link) })
+                        when (annotation) {
+                            is LinkAnnotation.Clickable -> addLink(annotation, link.start, link.end)
+                            is LinkAnnotation.Url -> addLink(annotation, link.start, link.end)
+                        }
                     }
                 }
             }
@@ -74,7 +90,8 @@ internal fun JapaneseContent(value: String, style: TextStyle = MaterialTheme.typ
         } else {
             Text(translated, style = style)
             parsed.links.distinctBy { it.url }.forEach { link ->
-                OpenWebLink(link.url, original.substring(link.start, link.end).takeIf { it != link.url } ?: "リンクを開く")
+                val label = original.substring(link.start, link.end).takeIf { it != link.url } ?: "リンクを開く"
+                TextButton(onClick = { openLink(link) }) { Text(label) }
             }
         }
         if (enabled && translation?.failed == true) {
@@ -94,15 +111,18 @@ private data class TextLink(val start: Int, val end: Int, val url: String)
 private data class LinkedText(val text: String, val links: List<TextLink>)
 
 private fun parseLinks(value: String): LinkedText {
-    val html = if ('<' in value || '&' in value) Html.fromHtml(
-        value.replace(Regex("(?is)<(style|script)\\b[^>]*>.*?</\\1>"), ""),
+    val markup = value.replace(Regex("(?is)<(style|script)\\b[^>]*>.*?</\\1>"), "")
+        .withGameReferenceAnchors()
+    val html = if ('<' in markup || '&' in markup) Html.fromHtml(
+        markup,
         Html.FROM_HTML_MODE_COMPACT
     ) else null
-    val text = html?.toString() ?: value
+    val text = html?.toString() ?: markup
     val links = html?.getSpans(0, html.length, URLSpan::class.java).orEmpty().mapNotNull { span ->
         val start = html?.getSpanStart(span) ?: -1
         val end = html?.getSpanEnd(span) ?: -1
-        webLink(span.url, relativeToHoYoLab = true)?.takeIf { start >= 0 && end > start }?.let { TextLink(start, end, it) }
+        val target = if (gameReferenceId(span.url) != null) span.url else webLink(span.url, relativeToHoYoLab = true)
+        target?.takeIf { start >= 0 && end > start }?.let { TextLink(start, end, it) }
     }.toMutableList()
     for (match in embeddedWebLink.findAll(text)) {
         val raw = match.value.trimEnd('.', ',', ')', '。', '、', '！', '）')

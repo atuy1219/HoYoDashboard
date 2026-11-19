@@ -3,10 +3,13 @@ package com.atuy.hoyodashboard
 import android.text.Html
 import com.atuy.hoyodashboard.api.ApiGame
 
-internal fun displayText(value: String): String = if ('<' in value || '&' in value) {
-    Html.fromHtml(value.replace(Regex("(?is)<(style|script)\\b[^>]*>.*?</\\1>"), ""), Html.FROM_HTML_MODE_COMPACT)
-        .toString().trim()
-} else value
+internal fun displayText(value: String): String {
+    val text = value.withoutGameReferenceMarkup()
+    return if ('<' in text || '&' in text) {
+        Html.fromHtml(text.replace(Regex("(?is)<(style|script)\\b[^>]*>.*?</\\1>"), ""), Html.FROM_HTML_MODE_COMPACT)
+            .toString().trim()
+    } else text
+}
 
 internal fun argumentLabel(key: String): String = when (key) {
     "id" -> "番号"

@@ -5,6 +5,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -19,20 +24,42 @@ class HoYoClient(
 ) {
     suspend fun dashboard(cookie: String): List<DashboardItem> = coroutineScope {
         accounts(cookie).map { role ->
-            async {
-                try {
-                    if (role.game == Game.TOT) {
-                        DashboardItem(role, null, "未定事件簿にはリアルタイムノートがありません")
-                    } else {
-                        DashboardItem(role, notes(cookie, role), null)
+            async { dashboardItem(cookie, role) }
+        }.awaitAll()
+    }
+
+    suspend fun dashboardItem(cookie: String, role: Role): DashboardItem = try {
+        if (role.game == Game.TOT) DashboardItem(role, null, "リアルタイムノートはありません")
+        else DashboardItem(role, notes(cookie, role), null)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        DashboardItem(role, null, japaneseApiError(error))
+    }
+
+    fun dashboardUpdates(cookie: String, knownRoles: List<Role>? = null): Flow<DashboardItem> = channelFlow {
+        if (knownRoles != null) {
+            knownRoles.forEach { role -> launch { send(dashboardItem(cookie, role)) } }
+        } else {
+            val seen = hashSetOf<Triple<Game, String, ApiRegion>>()
+            val mutex = Mutex()
+            ApiRegion.entries.forEach { region ->
+                launch {
+                    val roles = try {
+                        accounts(cookie, region)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        emptyList()
                     }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    DashboardItem(role, null, japaneseApiError(error))
+                    roles.forEach { role ->
+                        if (mutex.withLock { seen.add(Triple(role.game, role.uid, role.region)) }) {
+                            launch { send(dashboardItem(cookie, role)) }
+                        }
+                    }
                 }
             }
-        }.awaitAll()
+        }
     }
 
     suspend fun accounts(cookie: String): List<Role> = coroutineScope {

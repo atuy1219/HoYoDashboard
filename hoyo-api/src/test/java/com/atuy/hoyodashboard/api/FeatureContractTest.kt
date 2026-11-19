@@ -17,6 +17,38 @@ class FeatureContractTest {
     private val zzz = ApiAccount(ApiGame.ZZZ, "1300000010", "prod_gf_jp")
 
     @Test
+    fun dashboardProfileAndSelectedCharacterAvoidExtraListRequests() = runBlocking {
+        val requests = mutableListOf<String>()
+        val client = UpstreamFeatureClient(fixture { url, body ->
+            requests += url.path.substringAfterLast('/')
+            when (url.path.substringAfterLast('/')) {
+                "index" -> JSONObject("""{"stats":{"avatar_number":42},"role":{"nickname":"Test","level":60}}""")
+                "detail" -> {
+                    assertEquals(1, body.getJSONArray("character_ids").length())
+                    assertEquals(10000003, body.getJSONArray("character_ids").getInt(0))
+                    JSONObject("""{"list":[{"base":{"id":10000003,"name":"ジン"}}]}""")
+                }
+                else -> error("Unexpected request")
+            }
+        }, "", genshin)
+        assertEquals(42, (client.profileSummary() as GenshinProfile).avatarCount)
+        assertEquals(1, client.detailedCharacters(listOf(10000003)).size)
+        assertEquals(listOf("index", "detail"), requests)
+    }
+
+    @Test
+    fun diaryPreviewDoesNotFetchSubsequentPages() = runBlocking {
+        var requests = 0
+        val client = UpstreamFeatureClient(fixture { _, _ ->
+            requests++
+            JSONObject().put("list", JSONArray((1..20).map { JSONObject().put("id", it) }))
+                .put("has_more", true)
+        }, "", zzz)
+        assertEquals(20, client.monthlyDiaryEntries("2026-11", 1, 20).size)
+        assertEquals(1, requests)
+    }
+
+    @Test
     fun localizationDictionaryUsesLocaleAndSendsNoCredentials() = runBlocking {
         val api = UpstreamApiClient(transport = transport(
             envelope = { it },

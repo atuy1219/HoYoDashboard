@@ -2,6 +2,7 @@ package com.atuy.hoyodashboard.api
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import org.json.JSONArray
 import org.json.JSONObject
@@ -56,6 +57,10 @@ class UpstreamFeatureClient(
         return UpstreamModelParser.profile(account.game, raw(method))
     }
 
+    suspend fun profileSummary(): GameProfile = if (account.game == ApiGame.GENSHIN) {
+        UpstreamModelParser.profile(account.game, raw("get_partial_genshin_user"))
+    } else profile()
+
     suspend fun characters(): List<CharacterPreview> {
         val method = when (account.game) {
             ApiGame.GENSHIN -> "get_genshin_characters"
@@ -70,7 +75,9 @@ class UpstreamFeatureClient(
     suspend fun characterBuilds(): List<CharacterBuild> =
         detailedCharacters().map(::characterBuild)
 
-    suspend fun detailedCharacters(): List<JSONObject> {
+    suspend fun detailedCharacters(): List<JSONObject> = detailedCharacters(null)
+
+    suspend fun detailedCharacters(characterIds: List<Int>?): List<JSONObject> {
         val method = when (account.game) {
             ApiGame.GENSHIN -> "get_genshin_detailed_characters"
             ApiGame.STARRAIL -> "get_starrail_characters"
@@ -78,7 +85,12 @@ class UpstreamFeatureClient(
             ApiGame.HONKAI -> "get_honkai_battlesuits"
             ApiGame.TOT -> throw UnsupportedOperationException("Tears of Themis has no character Chronicle API.")
         }
-        val response = raw(method)
+        val arguments = when (account.game) {
+            ApiGame.GENSHIN -> characterIds?.let { mapOf("character_ids" to JSONArray(it).toString()) }
+            ApiGame.ZZZ -> characterIds?.let { mapOf("character_id" to JSONArray(it).toString()) }
+            else -> null
+        } ?: emptyMap()
+        val response = raw(method, arguments)
         val characters = response.jsonList()
         return if (account.game == ApiGame.GENSHIN) {
             characters.map { character ->
@@ -169,7 +181,12 @@ class UpstreamFeatureClient(
         return UpstreamModelParser.diary(raw(method, args))
     }
 
-    suspend fun monthlyDiaryEntries(month: String, type: Int = 1): List<JSONObject> {
+    suspend fun monthlyDiaryEntries(month: String, type: Int = 1): List<JSONObject> =
+        monthlyDiaryEntries(month, type, null)
+
+    suspend fun monthlyDiaryEntries(month: String, type: Int, limit: Int?): List<JSONObject> {
+        if (limit == 0) return emptyList()
+        require(limit == null || limit > 0)
         val method = when (account.game) {
             ApiGame.GENSHIN -> "genshin_diary_log"
             ApiGame.STARRAIL -> "starrail_diary_log"
@@ -184,11 +201,14 @@ class UpstreamFeatureClient(
             listOf("PolychromesData", "MatserTapeData", "BooponsData")[type - 1]
         } else type.toString()
         val arguments = mapOf("month" to monthValue, "type" to currency)
-        if (account.game != ApiGame.ZZZ) return raw(method, arguments).jsonList()
-        return UpstreamPaginator(api).items(
+        if (account.game != ApiGame.ZZZ) return raw(
+            method, arguments + (limit?.let { mapOf("limit" to it.toString()) } ?: emptyMap())
+        ).jsonList()
+        val entries = UpstreamPaginator(api).items(
             cookieProvider(), account, checkNotNull(UpstreamCatalog.find(method)), arguments,
             PageSpec(cursorParameter = "current_page", pageSize = 20)
-        ).toList()
+        )
+        return if (limit != null) entries.take(limit).toList() else entries.toList()
     }
 
     suspend fun rewardStatus(): JSONObject = raw("get_reward_info")

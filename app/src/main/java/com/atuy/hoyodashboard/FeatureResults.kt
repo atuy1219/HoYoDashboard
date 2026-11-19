@@ -20,7 +20,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
@@ -42,20 +41,20 @@ private val titleFields = listOf(
 private val portraitFields = listOf(
     "icon", "icon_url", "avatar_icon", "avatar_url", "avatar_icon_url", "avatar_square_icon",
     "square_icon", "square_icon_url", "role_square_url", "role_icon", "monster_icon", "head_icon", "card_icon", "image_url",
-    "big_icon", "role_image", "avatar_background_path", "cur_head_icon_url"
+    "big_icon", "role_image", "avatar_background_path", "cur_head_icon_url", "header_img_url", "img_url", "card_img_url"
 )
-private val bannerFields = listOf("banner", "img", "imgs", "cover", "cover_url", "cover_urls", "image", "picture")
+private val bannerFields = listOf("banner", "banner_url", "img", "imgs", "cover", "cover_url", "cover_urls", "image", "picture")
 private val proseFields = setOf(
     "desc", "description", "content", "text", "summary", "intro", "brief", "simple_desc",
     "desc_mi18n", "effect_description", "skill_description", "two_piece_description", "four_piece_description",
-    "introduction", "introduce", "rich_desc", "window_text"
+    "introduction", "introduce", "rich_desc", "window_text", "html", "rich_text", "script", "remark"
 )
 private val hiddenFields = setOf(
     "retcode", "message", "next_page_token", "next_end_id", "next_max_id", "end_id", "cursor",
     "last_id", "client_param", "session_param", "has_more", "is_last", "is_end", "authkey", "token", "cookie",
     "cookie_token", "cookie_token_v2", "stoken", "stoken_v2", "ltoken", "ltoken_v2", "combo_token",
     "game_token", "login_ticket", "pass_token", "verify_str", "uuid", "lang", "original_lang", "tzinfo",
-    "property_map", "relic_property_options", "version_id", "ann_id", "schedule_id"
+    "property_map", "relic_property_options", "version_id", "ann_id", "schedule_id", "app_path"
 )
 private val idFields = setOf(
     "id", "uid", "game_uid", "avatar_id", "character_id", "weapon_id", "item_id", "reliquary_id", "role_id",
@@ -86,9 +85,9 @@ internal fun FeatureResult(
             else -> result
         }
     }
-    var translate by remember(root, method) { mutableStateOf(false) }
+    var translate by remember(root, method) { mutableStateOf(true) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (method in translatableFeatures) {
+        if (method in translatableFeatures || remember(root) { containsForeignText(root) }) {
             TextButton(onClick = { translate = !translate }) {
                 Text(if (translate) "原文を表示" else "日本語に翻訳")
             }
@@ -125,7 +124,6 @@ private fun ResultObject(
                 (value !is String || value.isNotBlank())
         }.toList()
     }
-    val uriHandler = LocalUriHandler.current
     val links = remember(result, method) { if (onOpen == null) emptyList() else resultLinks(method, result) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         banner?.let { FeatureImage(it, wide = true) }
@@ -133,14 +131,15 @@ private fun ResultObject(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 FeatureImage(portrait)
                 title?.let {
-                    if (method in translatableFeatures && result.keys().asSequence().none { key ->
+                    if (result.keys().asSequence().none { key ->
                             key in setOf("nickname", "nick_name", "author_nickname")
                         }) JapaneseContent(it, MaterialTheme.typography.titleSmall)
                     else Text(displayText(it), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
-        for ((key, value) in entries) {
+        for ((key, originalValue) in entries) {
+            val value = remember(key, originalValue) { structuredValue(key, originalValue) }
             when (value) {
                 is JSONObject -> {
                     if (value.length() > 0) ResultGroup(fieldLabel(key), depth == 0 && method != "battle") {
@@ -160,18 +159,20 @@ private fun ResultObject(
                 }
                 null -> Unit
                 else -> {
-                    val url = (value as? String)?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+                    val url = (value as? String)?.let {
+                        webLink(it, relativeToHoYoLab = key.lowercase(Locale.ROOT) in setOf("web_path", "web_url"))
+                    }
                     if (url != null) {
-                        val link = publicImageUrl(url)
-                        if (link != null) {
-                            TextButton(onClick = { runCatching { uriHandler.openUri(link) } }) { Text("公式ページを開く") }
-                        }
+                        if (publicImageUrl(url) != null &&
+                            (isImageLink(url) || key in portraitFields || key in bannerFields || key.endsWith("_icon_url"))) {
+                            FeatureImage(url, wide = key !in portraitFields)
+                        } else OpenWebLink(url, linkLabel(key))
                         continue
                     }
                     val text = formatValue(key, value, method)
                     if (text.isBlank()) continue
                     if (key in proseFields) {
-                        JapaneseContent(text)
+                        JapaneseContent(value.toString())
                         (value as? String)?.let { raw ->
                             htmlImage.findAll(raw).map { it.groupValues[1] }
                                 .mapNotNull(::publicImageUrl).distinct().take(6).forEach { FeatureImage(it, wide = true) }
@@ -179,7 +180,10 @@ private fun ResultObject(
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(fieldLabel(key), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                            Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                            if (value is String && key !in userNameFields) {
+                                JapaneseContent(if (text == displayText(value)) value else text,
+                                    modifier = Modifier.weight(1f))
+                            } else Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium)
                         }
                     }
@@ -233,8 +237,10 @@ private fun ResultList(
                 }
                 is JSONArray -> ResultList(item, method, onOpen, depth + 1)
                 is String -> {
-                    val image = publicImageUrl(item)
+                    val url = webLink(item)
+                    val image = url?.takeIf(::isImageLink)?.let(::publicImageUrl)
                     if (image != null) FeatureImage(image, wide = true)
+                    else if (url != null) OpenWebLink(url)
                     else JapaneseContent(item)
                 }
                 is Number -> Text(formatValue("", item, method))
@@ -245,6 +251,34 @@ private fun ResultList(
             TextButton(onClick = { visible += 15 }) { Text("さらに表示（残り ${rows.length() - visible} 件）") }
         }
     }
+}
+
+private val userNameFields = setOf("nickname", "nick_name", "author_nickname", "username", "user_name")
+
+private fun containsForeignText(value: Any?): Boolean = when (value) {
+    is JSONObject -> value.keys().asSequence().any { key ->
+        key !in userNameFields && key !in hiddenFields && containsForeignText(value.opt(key))
+    }
+    is JSONArray -> (0 until minOf(value.length(), 50)).any { containsForeignText(value.opt(it)) }
+    is String -> likelyForeignText(value)
+    else -> false
+}
+
+private fun structuredValue(key: String, value: Any?): Any? {
+    if (key != "data" || value !is String) return value
+    val trimmed = value.trim()
+    return when {
+        trimmed.startsWith("{") -> runCatching { JSONObject(trimmed) }.getOrNull() ?: value
+        trimmed.startsWith("[") -> runCatching { JSONArray(trimmed) }.getOrNull() ?: value
+        else -> value
+    }
+}
+
+private fun linkLabel(key: String): String = when {
+    "wiki" in key -> "攻略Wikiを開く"
+    "video" in key -> "動画を開く"
+    "voice" in key || "audio" in key -> "音声を開く"
+    else -> "リンクを開く"
 }
 
 private fun imageValue(value: Any?): String? {

@@ -104,8 +104,9 @@ internal fun GameDetailScreen(
     var refreshToken by remember(item.role) { mutableIntStateOf(0) }
     var profile by remember(item.role) { mutableStateOf<GameProfile?>(null) }
     var characters by remember(item.role) { mutableStateOf<List<CharacterPreview>?>(null) }
-    var characterDetails by remember(item.role) { mutableStateOf<List<JSONObject>?>(null) }
+    var characterDetails by remember(item.role) { mutableStateOf<Map<Int, JSONObject>>(emptyMap()) }
     var gacha by remember(item.role) { mutableStateOf<List<GachaRecord>?>(null) }
+    var gachaLimit by remember(item.role) { mutableIntStateOf(20) }
     var gachaKeyInput by remember(item.role) { mutableStateOf("") }
     var gachaKey by remember(item.role) { mutableStateOf("") }
     var miliastra by remember(item.role) { mutableStateOf(false) }
@@ -113,6 +114,7 @@ internal fun GameDetailScreen(
     var diary by remember(item.role) { mutableStateOf<DiarySummary?>(null) }
     var diaryMonth by remember(item.role) { mutableStateOf<String?>(null) }
     var diaryEntries by remember(item.role) { mutableStateOf<List<JSONObject>?>(null) }
+    var diaryLimit by remember(item.role) { mutableIntStateOf(0) }
     var diaryCurrency by remember(item.role) { mutableIntStateOf(1) }
     var showTransactions by remember(item.role) { mutableStateOf(false) }
     var transactions by remember(item.role) { mutableStateOf<List<TransactionItem>?>(null) }
@@ -121,7 +123,7 @@ internal fun GameDetailScreen(
 
     val activeTab = tabs.getOrElse(selectedIndex) { tabs.first() }
 
-    LaunchedEffect(item.role, activeTab, refreshToken, diaryMonth, diaryCurrency, showTransactions, gachaKey, miliastra) {
+    LaunchedEffect(item.role, activeTab, refreshToken, diaryMonth, diaryCurrency, showTransactions, gachaKey, miliastra, gachaLimit, diaryLimit) {
         activeLoading = activeTab in setOf(
             DetailTab.OVERVIEW, DetailTab.CHARACTERS, DetailTab.GACHA, DetailTab.DIARY
         )
@@ -131,15 +133,14 @@ internal fun GameDetailScreen(
             when (activeTab) {
                 DetailTab.OVERVIEW -> {
                     if (item.role.game != Game.TOT && profile == null) {
-                        profile = features.profile()
+                        profile = features.profileSummary()
                     }
                 }
                 DetailTab.CHARACTERS -> {
                     if (characters == null) characters = features.characters()
-                    if (characterDetails == null) characterDetails = features.detailedCharacters()
                 }
                 DetailTab.GACHA -> if (gacha == null && (!gachaNeedsKey || gachaKey.isNotBlank())) {
-                    gacha = features.gachaHistory(perBannerLimit = 100, authKey = gachaKey, miliastra = miliastra)
+                    gacha = features.gachaHistory(perBannerLimit = gachaLimit, authKey = gachaKey, miliastra = miliastra)
                 }
                 DetailTab.DIARY -> {
                     if (showTransactions) {
@@ -147,8 +148,8 @@ internal fun GameDetailScreen(
                     } else {
                         if (diary == null) diary = features.monthlyDiary(diaryMonth)
                         val month = diaryMonth ?: diary?.month
-                        if (month != null && diaryEntries == null) {
-                            diaryEntries = features.monthlyDiaryEntries(month, diaryCurrency)
+                        if (month != null && diaryLimit > 0 && diaryEntries == null) {
+                            diaryEntries = features.monthlyDiaryEntries(month, diaryCurrency, diaryLimit)
                         }
                     }
                 }
@@ -178,16 +179,24 @@ internal fun GameDetailScreen(
                 )
             }
             TextButton(onClick = {
-                profile = null
-                characters = null
-                characterDetails = null
-                gacha = null
-                diary = null
-                diaryEntries = null
-                transactions = null
+                when (activeTab) {
+                    DetailTab.OVERVIEW -> {
+                        profile = null
+                        onRefresh()
+                    }
+                    DetailTab.CHARACTERS -> {
+                        characters = null
+                        characterDetails = emptyMap()
+                    }
+                    DetailTab.GACHA -> gacha = null
+                    DetailTab.DIARY -> if (showTransactions) transactions = null else {
+                        diary = null
+                        diaryEntries = null
+                    }
+                    else -> Unit
+                }
                 refreshToken++
-                onRefresh()
-            }) { Text("更新") }
+            }, enabled = !activeLoading) { Text("更新") }
         }
         PrimaryScrollableTabRow(selectedTabIndex = selectedIndex) {
             tabs.forEachIndexed { index, tab ->
@@ -215,14 +224,16 @@ internal fun GameDetailScreen(
             when (activeTab) {
                 DetailTab.OVERVIEW -> {
                     NoteOverview(item.note, item.error, item.role.game.resource)
-                    profile?.let { ProfileSummary(it) }
+                    profile?.let { ProfileSummary(it, item.role.nickname, item.role.level) }
                     if (item.role.game == Game.TOT) {
-                        InfoCard("未定事件簿", "このゲームにはBattle ChronicleのプロフィールAPIがありません。")
+                        InfoCard("未定事件簿", "このゲームには戦績のプロフィール機能がありません。")
                     }
                 }
                 DetailTab.CHARACTERS -> {
                     val rows = characters
-                    if (rows != null) CharacterList(rows, characterDetails.orEmpty(), account.game)
+                    if (rows != null) CharacterList(rows, features, characterDetails) { id, detail ->
+                        characterDetails = characterDetails + (id to detail)
+                    }
                 }
                 DetailTab.BATTLE -> key(refreshToken) { FeatureDirectory(features, "戦闘記録") }
                 DetailTab.GACHA -> {
@@ -231,6 +242,7 @@ internal fun GameDetailScreen(
                         FeatureInput(FeatureField("mode", "履歴の種類", choices = pools), if (miliastra) "miliastra" else "normal") {
                             if (miliastra != (it == "miliastra")) {
                                 gacha = null
+                                gachaLimit = if (it == "miliastra") 5 else 20
                                 miliastra = it == "miliastra"
                             }
                         }
@@ -244,6 +256,12 @@ internal fun GameDetailScreen(
                         }) { Text("履歴を表示") }
                     }
                     gacha?.let { GachaList(it, account.game) }
+                    if (!activeLoading && gacha?.isNotEmpty() == true && gachaLimit < 100) {
+                        TextButton(onClick = {
+                            gacha = null
+                            gachaLimit = 100
+                        }) { Text("各種類の履歴を100件まで取得") }
+                    }
                 }
                 DetailTab.DIARY -> {
                     if (account.game == ApiGame.GENSHIN && account.region == ApiRegion.OVERSEAS) {
@@ -258,11 +276,19 @@ internal fun GameDetailScreen(
                             diaryMonth = it
                             diary = null
                             diaryEntries = null
+                            diaryLimit = 0
                         }, onCurrency = {
                             diaryCurrency = it
                             diaryEntries = null
+                            diaryLimit = 0
                         })
                         diary?.let { DiaryPanel(it, diaryEntries) }
+                        if (diary != null && !activeLoading && (diaryLimit == 0 || (diaryEntries?.size ?: 0) >= diaryLimit)) {
+                            TextButton(onClick = {
+                                diaryEntries = null
+                                diaryLimit = if (diaryLimit == 0) 100 else diaryLimit + 100
+                            }) { Text(if (diaryLimit == 0) "獲得明細を見る" else "さらに明細を取得") }
+                        }
                     }
                 }
                 DetailTab.ACTIONS -> key(refreshToken) { ActionPanel(
@@ -329,7 +355,7 @@ private fun NoteOverview(note: DailyNote?, error: String?, resourceLabel: String
 }
 
 @Composable
-private fun ProfileSummary(profile: GameProfile) {
+private fun ProfileSummary(profile: GameProfile, nickname: String, level: Int) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2230)),
         shape = RoundedCornerShape(20.dp)
@@ -339,8 +365,8 @@ private fun ProfileSummary(profile: GameProfile) {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text("プレイヤー情報", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            ValueRow("名前", profile.nickname)
-            ValueRow("レベル", profile.level.toString())
+            ValueRow("名前", profile.nickname.ifBlank { nickname })
+            ValueRow("レベル", (profile.level.takeIf { it > 0 } ?: level).toString())
             when (profile) {
                 is GenshinProfile -> {
                     ValueRow("アクティブ日数", profile.activeDays.toString())
@@ -366,13 +392,32 @@ private fun ProfileSummary(profile: GameProfile) {
 }
 
 @Composable
-private fun CharacterList(characters: List<CharacterPreview>, details: List<JSONObject>, game: ApiGame) {
-    val byId = remember(details) {
-        details.associateBy { data ->
-            data.optInt("id", data.optInt("avatar_id", data.optJSONObject("base")?.optInt("id") ?: 0))
+private fun CharacterList(
+    characters: List<CharacterPreview>,
+    features: UpstreamFeatureClient,
+    details: Map<Int, JSONObject>,
+    onDetail: (Int, JSONObject) -> Unit
+) {
+    val game = features.account.game
+    var selected by remember(characters) { mutableStateOf<CharacterPreview?>(null) }
+    var detailLoading by remember { mutableStateOf(false) }
+    var detailError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(selected?.id, characters) {
+        detailError = null
+        val character = selected ?: return@LaunchedEffect
+        if (game !in setOf(ApiGame.GENSHIN, ApiGame.ZZZ) || character.id in details) return@LaunchedEffect
+        detailLoading = true
+        try {
+            val result = features.detailedCharacters(listOf(character.id)).firstOrNull()
+            if (result != null) onDetail(character.id, result)
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            detailError = japaneseApiError(exception)
+        } finally {
+            detailLoading = false
         }
     }
-    var selected by remember(characters, details) { mutableStateOf<CharacterPreview?>(null) }
     var visible by remember(characters) { mutableIntStateOf(24) }
     SectionCard("キャラクター ${characters.size} 人") {
         if (characters.isEmpty()) Text("キャラクター情報がありません")
@@ -399,7 +444,9 @@ private fun CharacterList(characters: List<CharacterPreview>, details: List<JSON
             title = { Text(character.name.ifBlank { "キャラクター詳細" }) },
             text = {
                 Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                    FeatureResult(byId[character.id] ?: character.raw, "character")
+                    if (detailLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    detailError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    FeatureResult(details[character.id] ?: character.raw, "character")
                 }
             },
             confirmButton = { TextButton(onClick = { selected = null }) { Text("閉じる") } }
@@ -509,7 +556,10 @@ private fun DiaryPanel(summary: DiarySummary, entries: List<JSONObject>?) {
         summary.currentMasterTapes?.let { ValueRow("マスターテープ", it.toString()) }
         summary.currentBoopons?.let { ValueRow("ボンプチケット", it.toString()) }
         summary.categories.forEach { category ->
-            ValueRow(category.name.ifBlank { "その他" }, category.amount.toString())
+            Row(Modifier.fillMaxWidth()) {
+                JapaneseContent(category.name.ifBlank { "その他" }, modifier = Modifier.weight(1f))
+                Text(category.amount.toString())
+            }
         }
         if (summary.currentPrimogems == null && summary.currentMora == null &&
             summary.currentHcoin == null && summary.currentStellarJades == null && summary.currentPolychromes == null &&
@@ -531,7 +581,7 @@ private fun TransactionPanel(transactions: List<TransactionItem>) {
         transactions.forEach { item ->
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(item.action, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    JapaneseContent(item.action, modifier = Modifier.weight(1f))
                     Text(item.amount.toString())
                 }
                 Text(item.time, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

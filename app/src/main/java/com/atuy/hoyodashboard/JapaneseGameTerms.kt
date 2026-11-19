@@ -8,6 +8,7 @@ private val networkNamePattern = Regex("([a-z0-9])([A-Z])")
 private val digits = Regex("\\d+")
 internal fun japaneseFieldFallback(key: String): String {
     fieldGlossary[key]?.let { return it }
+    if (key.any { it in '\u3040'..'\u30ff' || it in '\u4e00'..'\u9fff' }) return key
     val words = networkNamePattern.replace(key, "$1_$2").lowercase(Locale.ROOT).split('_')
     val translated = ArrayList<String>()
     var index = 0
@@ -188,6 +189,18 @@ private val fieldGlossary = buildMap {
     add("調度品", "furnishings")
     add("2セットの効果", "two_piece_description")
     add("4セットの効果", "four_piece_description")
+    add("リンク", "link", "links", "url", "web_url", "web_path", "jump_url", "jump_link", "link_url", "target_url")
+    add("攻略Wiki", "wiki", "wiki_url", "card_wiki", "avatar_wiki", "relic_wiki", "equip_wiki")
+    add("画像", "image_url", "img_url", "header_img_url", "banner_url", "origin_url")
+    add("動画", "video_url", "video_list", "videos")
+    add("音声", "voice_url", "audio_url", "voice_list")
+    add("本文", "html", "rich_text", "richText")
+    add("基本情報", "baseInfo")
+    add("セット効果", "reliquary_set_effect")
+    add("コンポーネント", "component_id", "component_type")
+    add("記事", "entry_page", "entry_pages")
+    add("開催中", "is_active")
+    add("未読", "unread")
 }
 
 private val fieldWords = mapOf(
@@ -213,6 +226,9 @@ private val fieldWords = mapOf(
     "icon" to "アイコン", "image" to "画像", "picture" to "画像", "background" to "背景", "card" to "カード",
     "cover" to "表紙", "banner" to "開催情報", "video" to "動画", "voice" to "ボイス", "logo" to "ロゴ",
     "height" to "高さ", "width" to "幅", "color" to "色", "book" to "書籍", "page" to "ページ",
+    "url" to "リンク", "link" to "リンク", "wiki" to "攻略Wiki", "target" to "対象", "jump" to "移動先",
+    "content" to "内容", "text" to "テキスト", "html" to "本文", "component" to "コンポーネント",
+    "module" to "項目", "header" to "見出し", "footer" to "末尾", "button" to "ボタン", "label" to "分類",
     "uid" to "ユーザーID", "game" to "ゲーム", "user" to "プレイヤー", "account" to "アカウント",
     "tag" to "タグ", "setting" to "設定", "profile" to "プロフィール", "filter" to "絞り込み",
     "chapter" to "章", "story" to "ストーリー", "event" to "イベント", "activity" to "イベント",
@@ -278,9 +294,21 @@ private val namedValues = mapOf(
     "Shaman" to "調和", "Warlock" to "虚無", "Priest" to "豊穣", "Memory" to "記憶", "Elation" to "愉悦",
     "Fire" to "炎", "Ice" to "氷", "Physical" to "物理", "Thunder" to "雷", "Wind" to "風",
     "Quantum" to "量子", "Imaginary" to "虚数", "Ether" to "エーテル",
-    "Pyro" to "炎", "Hydro" to "水", "Anemo" to "風", "Electro" to "雷", "Dendro" to "草", "Cryo" to "氷", "Geo" to "岩"
+    "Pyro" to "炎", "Hydro" to "水", "Anemo" to "風", "Electro" to "雷", "Dendro" to "草", "Cryo" to "氷", "Geo" to "岩",
+    "LINK" to "リンク", "IMAGE" to "画像", "TEXT" to "テキスト", "VIDEO" to "動画",
+    "AUDIO" to "音声", "HTML" to "本文", "TABLE" to "表", "RICH_TEXT" to "本文",
+    "BUTTON" to "ボタン", "NORMAL" to "通常", "UNKNOWN" to "不明", "NONE" to "なし",
+    "SUCCESS" to "成功", "FAILED" to "失敗", "LOCKED" to "未解放", "UNLOCKED" to "解放済み",
+    "FINISHED" to "完了", "UNFINISHED" to "未完了", "IN_PROGRESS" to "進行中",
+    "AVAILABLE" to "利用可能", "UNAVAILABLE" to "利用不可", "COMPLETED" to "完了",
+    "true" to "はい", "false" to "いいえ", "yes" to "はい", "no" to "いいえ",
+    "Genshin Impact" to "原神", "Honkai: Star Rail" to "崩壊：スターレイル",
+    "Honkai Impact 3rd" to "崩壊3rd", "Zenless Zone Zero" to "ゼンレスゾーンゼロ",
+    "Tears of Themis" to "未定事件簿"
 )
 
+private val lowercaseNamedValues = namedValues.mapKeys { it.key.lowercase(Locale.ROOT) }
+private fun namedValue(value: String): String? = namedValues[value] ?: lowercaseNamedValues[value.lowercase(Locale.ROOT)]
 private val machineValue = Regex("[A-Z][A-Z0-9]+(?:_[A-Z0-9]+)+|[a-zA-Z0-9]+(?:_[a-zA-Z0-9]+){2,}")
 private val stateKeys = setOf("state", "status", "gacha_state", "video_store_state", "sale_state", "shelve_state",
     "bench_state", "member_card_state", "expedition_state", "card_sign_state", "card_sign")
@@ -323,9 +351,10 @@ internal fun localizedApiValue(key: String, value: String, method: String?): Str
         "schedule_type" -> mapOf("1" to "今期", "2" to "前期", "3" to "直近の開催分")[value]
         "month", "data_month", "current_month" -> localizedMonth(value)
         "is_up", "is_owned", "is_unlock", "is_sign" -> mapOf("1" to "はい", "0" to "いいえ")[value]
-        "kind", "type", "data_type", "item_type", "state", "status", "element", "root_type", "lineup_type", "order" ->
-            namedValues[value] ?: namedValues[value.lowercase(Locale.ROOT)].takeIf { value.isNotBlank() }
-        else -> namedValues[value].takeIf { key in stateKeys || key == "action" || key == "currency_type" }
+        "kind", "type", "data_type", "item_type", "state", "status", "element", "root_type", "lineup_type", "order",
+        "component_type", "component_id", "content_type", "game", "game_name", "weapon_type", "element_type_name" ->
+            namedValue(value)
+        else -> namedValue(value).takeIf { key in stateKeys || key == "action" || key == "currency_type" }
     } ?: if (key in stateKeys && machineValue.matches(value)) "状況不明" else null
 }
 

@@ -5,10 +5,10 @@ import android.text.Html
 import android.text.style.URLSpan
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -47,7 +47,7 @@ internal fun JapaneseContent(value: String, style: TextStyle = MaterialTheme.typ
     val gameReferenceHandler = LocalGameReferenceHandler.current
     val uriHandler = LocalUriHandler.current
     val parsed = remember(value) { parseLinks(value) }
-    var missingReference by remember(value) { mutableStateOf<GameTextReference?>(null) }
+    var selectedReference by remember(value) { mutableStateOf<GameTextReference?>(null) }
     val translation by produceState<TranslationResult?>(null, parsed, enabled) {
         this.value = null
         if (enabled && likelyForeignText(parsed.text)) {
@@ -67,10 +67,7 @@ internal fun JapaneseContent(value: String, style: TextStyle = MaterialTheme.typ
             if (id != null) {
                 val reference = GameTextReference(id, link.label)
                 if (gameReferenceHandler != null) gameReferenceHandler(reference)
-                else {
-                    val url = gameReferenceUrl(id)
-                    if (url == null || runCatching { uriHandler.openUri(url) }.isFailure) missingReference = reference
-                }
+                else selectedReference = reference
             } else runCatching { uriHandler.openUri(link.url) }
         }
         val color = MaterialTheme.colorScheme.primary
@@ -97,13 +94,10 @@ internal fun JapaneseContent(value: String, style: TextStyle = MaterialTheme.typ
                 style = MaterialTheme.typography.labelSmall)
         }
     }
-    missingReference?.let { reference ->
-        AlertDialog(
-            onDismissRequest = { missingReference = null },
-            title = { Text(reference.label.ifBlank { "参照先" }) },
-            text = { Text("参照先の説明データがありません。") },
-            confirmButton = { TextButton(onClick = { missingReference = null }) { Text("閉じる") } }
-        )
+    selectedReference?.let { reference ->
+        CompositionLocalProvider(LocalGameReferenceHandler provides { nested -> selectedReference = nested }) {
+            GameReferenceDialog(reference, null) { selectedReference = null }
+        }
     }
 }
 

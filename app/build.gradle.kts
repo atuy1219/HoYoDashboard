@@ -22,6 +22,7 @@ android {
 
 dependencies {
     implementation(project(":hoyo-api"))
+    implementation("org.jsoup:jsoup:1.24.1")
     implementation("com.google.mlkit:language-id:17.0.6")
     implementation("com.google.mlkit:translate:17.0.3")
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
